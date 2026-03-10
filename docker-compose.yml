@@ -1,0 +1,42 @@
+services:
+  backend:
+    build: ./backend
+    environment:
+      - DB_PATH=/data/aozora.db
+      - PORT=3001
+    volumes:
+      - aozora_data:/data:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # One-shot indexer — run manually:
+  #   docker compose run --rm indexer
+  # or with options:
+  #   docker compose run --rm indexer --limit 200 --resume
+  indexer:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.indexer
+    environment:
+      - DB_PATH=/data/aozora.db
+      - DATA_DIR=/data
+    volumes:
+      - aozora_data:/data
+    profiles:
+      - indexer
+
+volumes:
+  aozora_data:
