@@ -210,10 +210,11 @@ function parseCatalog(csvBuffer: Buffer): CatalogRow[] {
  * Convert an aozora.gr.jp zip URL to a raw GitHub URL for aozorabunko_text.
  * e.g. https://www.aozora.gr.jp/cards/000081/files/45630_ruby_23610.zip
  *   -> https://raw.githubusercontent.com/aozorahack/aozorabunko_text/master/cards/000081/files/45630_ruby_23610/45630_ruby_23610.txt
+ * Returns null if the URL doesn't match the expected zip pattern.
  */
-function textUrlFromFileUrl(fileUrl: string): string {
+function textUrlFromFileUrl(fileUrl: string): string | null {
   const match = fileUrl.match(/\/(cards\/\d+\/files\/([^/]+))\.zip$/);
-  if (!match) throw new Error(`Unexpected file_url format: ${fileUrl}`);
+  if (!match) return null;
   const [, dirPath, basename] = match;
   return `https://raw.githubusercontent.com/aozorahack/aozorabunko_text/master/${dirPath}/${basename}.txt`;
 }
@@ -275,6 +276,11 @@ async function main() {
 
       try {
         const txtUrl = textUrlFromFileUrl(work.file_url);
+        if (!txtUrl) {
+          console.error(`\nSkipping [${work.work_id}]: unrecognized file_url format: ${work.file_url}`);
+          logStatus.run(work.work_id, 'skip', Date.now());
+          return;
+        }
         await downloadWithRetry(txtUrl, tempPath);
         const rawText = decodeText(fs.readFileSync(tempPath), work.encoding);
 
@@ -303,7 +309,9 @@ async function main() {
       } catch (err) {
         errors++;
         logStatus.run(work.work_id, 'error', Date.now());
-        // Don't log every error to avoid noise; summarize at end
+        if (errors <= 3) {
+          console.error(`\nError [${work.work_id}] file_url=${work.file_url}: ${err instanceof Error ? err.message : err}`);
+        }
       } finally {
         try { fs.unlinkSync(tempPath); } catch {}
         done++;
