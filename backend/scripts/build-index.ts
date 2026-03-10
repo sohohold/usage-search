@@ -53,6 +53,11 @@ function download(url: string, dest: string): Promise<void> {
     const proto = url.startsWith('https') ? https : http;
     const file = fs.createWriteStream(dest);
     proto.get(url, (res) => {
+      if (res.statusCode !== undefined && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        file.close();
+        try { fs.unlinkSync(dest); } catch {}
+        return download(res.headers.location, dest).then(resolve, reject);
+      }
       if (res.statusCode !== 200) {
         file.close();
         fs.unlinkSync(dest);
