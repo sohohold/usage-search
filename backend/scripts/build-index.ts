@@ -32,7 +32,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR ?? path.join(__dirname, '../../data');
 const DB_PATH = process.env.DB_PATH ?? path.join(DATA_DIR, 'aozora.db');
 const CATALOG_URL =
-  'https://www.aozora.gr.jp/index_pages/list_person_all_extended_utf8.zip';
+  'https://raw.githubusercontent.com/aozorabunko/aozorabunko/master/index_pages/list_person_all_extended_utf8.zip';
 const CATALOG_PATH = path.join(DATA_DIR, 'catalog.zip');
 
 const args = process.argv.slice(2);
@@ -206,17 +206,21 @@ function parseCatalog(csvBuffer: Buffer): CatalogRow[] {
 // Per-work processing
 // ---------------------------------------------------------------------------
 
-function extractText(zipBuffer: Buffer, encoding: string): string | null {
-  try {
-    const zip = new AdmZip(zipBuffer);
-    const entry = zip.getEntries().find((e) => e.entryName.endsWith('.txt'));
-    if (!entry) return null;
-    const raw = entry.getData();
-    const enc = encoding.toLowerCase().includes('utf') ? 'utf8' : 'Shift_JIS';
-    return iconv.decode(raw, enc);
-  } catch {
-    return null;
-  }
+/**
+ * Convert an aozora.gr.jp zip URL to a raw GitHub URL for aozorabunko_text.
+ * e.g. https://www.aozora.gr.jp/cards/000081/files/45630_ruby_23610.zip
+ *   -> https://raw.githubusercontent.com/aozorahack/aozorabunko_text/master/cards/000081/files/45630_ruby_23610/45630_ruby_23610.txt
+ */
+function textUrlFromFileUrl(fileUrl: string): string {
+  const match = fileUrl.match(/\/(cards\/\d+\/files\/([^/]+))\.zip$/);
+  if (!match) throw new Error(`Unexpected file_url format: ${fileUrl}`);
+  const [, dirPath, basename] = match;
+  return `https://raw.githubusercontent.com/aozorahack/aozorabunko_text/master/${dirPath}/${basename}.txt`;
+}
+
+function decodeText(buf: Buffer, encoding: string): string {
+  const enc = encoding.toLowerCase().includes('utf') ? 'utf8' : 'Shift_JIS';
+  return iconv.decode(buf, enc);
 }
 
 // ---------------------------------------------------------------------------
@@ -267,12 +271,12 @@ async function main() {
   await pMap(
     works,
     async (work, i) => {
-      const tempPath = path.join(DATA_DIR, `_tmp_${process.pid}_${i}.zip`);
+      const tempPath = path.join(DATA_DIR, `_tmp_${process.pid}_${i}.txt`);
 
       try {
-        await downloadWithRetry(work.file_url, tempPath);
-        const zipBuf = fs.readFileSync(tempPath);
-        const rawText = extractText(zipBuf, work.encoding);
+        const txtUrl = textUrlFromFileUrl(work.file_url);
+        await downloadWithRetry(txtUrl, tempPath);
+        const rawText = decodeText(fs.readFileSync(tempPath), work.encoding);
 
         if (!rawText) {
           logStatus.run(work.work_id, 'no_text', Date.now());
