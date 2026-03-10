@@ -48,11 +48,13 @@ const RETRY_DELAYS = [1000, 2000, 4000];
 // Helpers
 // ---------------------------------------------------------------------------
 
+const CONNECT_TIMEOUT_MS = 30_000;
+
 function download(url: string, dest: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const proto = url.startsWith('https') ? https : http;
     const file = fs.createWriteStream(dest);
-    proto.get(url, (res) => {
+    const req = proto.get(url, (res) => {
       if (res.statusCode !== undefined && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         file.close();
         try { fs.unlinkSync(dest); } catch {}
@@ -67,7 +69,11 @@ function download(url: string, dest: string): Promise<void> {
       }
       res.pipe(file);
       file.on('finish', () => file.close(() => resolve()));
-    }).on('error', (err) => {
+    });
+    req.setTimeout(CONNECT_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Connection timeout after ${CONNECT_TIMEOUT_MS / 1000}s for ${url}`));
+    });
+    req.on('error', (err) => {
       file.close();
       try { fs.unlinkSync(dest); } catch {}
       reject(err);
