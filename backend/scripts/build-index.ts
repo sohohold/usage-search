@@ -181,6 +181,7 @@ function parseCatalog(csvBuffer: Buffer): CatalogRow[] {
     columns: true,
     skip_empty_lines: true,
     relax_quotes: true,
+    bom: true,
   }) as Record<string, string>[];
 
   return records
@@ -300,7 +301,8 @@ async function main() {
           insertWork.run(work);
           const row = db
             .prepare<[string], { id: number }>('SELECT id FROM works WHERE work_id = ?')
-            .get(work.work_id)!;
+            .get(work.work_id);
+          if (!row) throw new Error(`work not found after insert: ${work.work_id}`);
           for (const chunk of chunks) {
             insertChunk.run(String(row.id), chunk);
           }
