@@ -5,7 +5,7 @@ import type { SearchResponse, Stats } from './types.ts';
 
 const PAGE_SIZE = 20;
 const DEBOUNCE_MS = 400;
-const API_BASE = '/api';
+const API_BASE = import.meta.env.VITE_API_BASE ?? '/api';
 
 export default function App() {
   const [query, setQuery] = useState('');

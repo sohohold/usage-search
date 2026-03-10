@@ -12,8 +12,8 @@ app.get('/api/search', (c) => {
   const limit = Math.min(Math.max(parseInt(c.req.query('limit') ?? '20'), 1), 50);
   const offset = Math.max(parseInt(c.req.query('offset') ?? '0'), 0);
 
-  if (q.length < 2) {
-    return c.json({ error: '2文字以上入力してください' }, 400);
+  if (q.length < 3) {
+    return c.json({ error: '3文字以上入力してください' }, 400);
   }
 
   try {

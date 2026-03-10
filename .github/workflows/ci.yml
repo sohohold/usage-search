@@ -99,15 +99,15 @@ jobs:
 
       - name: Test /api/search
         run: |
-          # Search for a common word
-          RESULT=$(curl -sf "http://localhost:3001/api/search?q=%E3%81%AE%E4%B8%AD&limit=5")
+          # Search for a common word (trigram FTS5 requires 3+ chars)
+          RESULT=$(curl -sf "http://localhost:3001/api/search?q=%E3%81%AE%E4%B8%AD%E3%81%AB&limit=5")
           echo "$RESULT" | jq .
           echo "$RESULT" | jq -e '.results | length > 0'
 
       - name: Test short query rejection
         run: |
-          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3001/api/search?q=a")
-          [ "$STATUS" = "400" ] && echo "Correctly rejected 1-char query" || exit 1
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3001/api/search?q=ab")
+          [ "$STATUS" = "400" ] && echo "Correctly rejected 2-char query" || exit 1
 
   docker-build:
     runs-on: ubuntu-latest

@@ -32,7 +32,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR ?? path.join(__dirname, '../../data');
 const DB_PATH = process.env.DB_PATH ?? path.join(DATA_DIR, 'aozora.db');
 const CATALOG_URL =
-  'https://www.aozora.gr.jp/index_pages/list_person_all_extended_utf8.zip';
+  'https://raw.githubusercontent.com/aozorabunko/aozorabunko/master/index_pages/list_person_all_extended_utf8.zip';
 const CATALOG_PATH = path.join(DATA_DIR, 'catalog.zip');
 
 const args = process.argv.slice(2);
@@ -48,11 +48,20 @@ const RETRY_DELAYS = [1000, 2000, 4000];
 // Helpers
 // ---------------------------------------------------------------------------
 
+const CONNECT_TIMEOUT_MS = 30_000;
+
 function download(url: string, dest: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const proto = url.startsWith('https') ? https : http;
     const file = fs.createWriteStream(dest);
-    proto.get(url, (res) => {
+    const req = proto.get(url, (res) => {
+      if (res.statusCode !== undefined && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        file.close();
+        try { fs.unlinkSync(dest); } catch {}
+        // Upgrade HTTP redirects to HTTPS to avoid port-80 blocks
+        const location = res.headers.location.replace(/^http:\/\//i, 'https://');
+        return download(location, dest).then(resolve, reject);
+      }
       if (res.statusCode !== 200) {
         file.close();
         fs.unlinkSync(dest);
@@ -60,7 +69,11 @@ function download(url: string, dest: string): Promise<void> {
       }
       res.pipe(file);
       file.on('finish', () => file.close(() => resolve()));
-    }).on('error', (err) => {
+    });
+    req.setTimeout(CONNECT_TIMEOUT_MS, () => {
+      req.destroy(new Error(`Connection timeout after ${CONNECT_TIMEOUT_MS / 1000}s for ${url}`));
+    });
+    req.on('error', (err) => {
       file.close();
       try { fs.unlinkSync(dest); } catch {}
       reject(err);
@@ -168,6 +181,7 @@ function parseCatalog(csvBuffer: Buffer): CatalogRow[] {
     columns: true,
     skip_empty_lines: true,
     relax_quotes: true,
+    bom: true,
   }) as Record<string, string>[];
 
   return records
@@ -193,17 +207,22 @@ function parseCatalog(csvBuffer: Buffer): CatalogRow[] {
 // Per-work processing
 // ---------------------------------------------------------------------------
 
-function extractText(zipBuffer: Buffer, encoding: string): string | null {
-  try {
-    const zip = new AdmZip(zipBuffer);
-    const entry = zip.getEntries().find((e) => e.entryName.endsWith('.txt'));
-    if (!entry) return null;
-    const raw = entry.getData();
-    const enc = encoding.toLowerCase().includes('utf') ? 'utf8' : 'Shift_JIS';
-    return iconv.decode(raw, enc);
-  } catch {
-    return null;
-  }
+/**
+ * Convert an aozora.gr.jp zip URL to a raw GitHub URL for aozorabunko_text.
+ * e.g. https://www.aozora.gr.jp/cards/000081/files/45630_ruby_23610.zip
+ *   -> https://raw.githubusercontent.com/aozorahack/aozorabunko_text/master/cards/000081/files/45630_ruby_23610/45630_ruby_23610.txt
+ * Returns null if the URL doesn't match the expected zip pattern.
+ */
+function textUrlFromFileUrl(fileUrl: string): string | null {
+  const match = fileUrl.match(/\/(cards\/\d+\/files\/([^/]+))\.zip$/);
+  if (!match) return null;
+  const [, dirPath, basename] = match;
+  return `https://raw.githubusercontent.com/aozorahack/aozorabunko_text/master/${dirPath}/${basename}.txt`;
+}
+
+function decodeText(buf: Buffer, encoding: string): string {
+  const enc = encoding.toLowerCase().includes('utf') ? 'utf8' : 'Shift_JIS';
+  return iconv.decode(buf, enc);
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +245,7 @@ async function main() {
   if (RESUME) {
     const indexed = new Set(
       db
-        .prepare<[], { work_id: string }>('SELECT work_id FROM index_log WHERE status = ?')
+        .prepare<[string], { work_id: string }>('SELECT work_id FROM index_log WHERE status = ?')
         .all('ok')
         .map((r) => r.work_id)
     );
@@ -254,12 +273,17 @@ async function main() {
   await pMap(
     works,
     async (work, i) => {
-      const tempPath = path.join(DATA_DIR, `_tmp_${process.pid}_${i}.zip`);
+      const tempPath = path.join(DATA_DIR, `_tmp_${process.pid}_${i}.txt`);
 
       try {
-        await downloadWithRetry(work.file_url, tempPath);
-        const zipBuf = fs.readFileSync(tempPath);
-        const rawText = extractText(zipBuf, work.encoding);
+        const txtUrl = textUrlFromFileUrl(work.file_url);
+        if (!txtUrl) {
+          console.error(`\nSkipping [${work.work_id}]: unrecognized file_url format: ${work.file_url}`);
+          logStatus.run(work.work_id, 'skip', Date.now());
+          return;
+        }
+        await downloadWithRetry(txtUrl, tempPath);
+        const rawText = decodeText(fs.readFileSync(tempPath), work.encoding);
 
         if (!rawText) {
           logStatus.run(work.work_id, 'no_text', Date.now());
@@ -277,7 +301,8 @@ async function main() {
           insertWork.run(work);
           const row = db
             .prepare<[string], { id: number }>('SELECT id FROM works WHERE work_id = ?')
-            .get(work.work_id)!;
+            .get(work.work_id);
+          if (!row) throw new Error(`work not found after insert: ${work.work_id}`);
           for (const chunk of chunks) {
             insertChunk.run(String(row.id), chunk);
           }
@@ -286,7 +311,9 @@ async function main() {
       } catch (err) {
         errors++;
         logStatus.run(work.work_id, 'error', Date.now());
-        // Don't log every error to avoid noise; summarize at end
+        if (errors <= 3) {
+          console.error(`\nError [${work.work_id}] file_url=${work.file_url}: ${err instanceof Error ? err.message : err}`);
+        }
       } finally {
         try { fs.unlinkSync(tempPath); } catch {}
         done++;
