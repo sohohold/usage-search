@@ -226,7 +226,7 @@ async function main() {
   if (RESUME) {
     const indexed = new Set(
       db
-        .prepare<[], { work_id: string }>('SELECT work_id FROM index_log WHERE status = ?')
+        .prepare<[string], { work_id: string }>('SELECT work_id FROM index_log WHERE status = ?')
         .all('ok')
         .map((r) => r.work_id)
     );
