@@ -64,7 +64,7 @@ function download(url: string, dest: string): Promise<void> {
       }
       if (res.statusCode !== 200) {
         file.close();
-        fs.unlinkSync(dest);
+        try { fs.unlinkSync(dest); } catch {}
         return reject(new Error(`HTTP ${res.statusCode} for ${url}`));
       }
       res.pipe(file);
