@@ -1,21 +1,21 @@
 FROM node:22-slim AS builder
 
 WORKDIR /app
-COPY package*.json tsconfig.json ./
+COPY backend/package*.json backend/tsconfig.json ./
 RUN npm ci
-COPY src ./src
+COPY backend/src ./src
 RUN npm run build
 
 # ---- runtime ----
 FROM node:22-slim
 
 WORKDIR /app
-COPY package*.json tsconfig.json ./
+COPY backend/package*.json backend/tsconfig.json ./
 # Keep all deps (tsx needed for indexer at first-run)
 RUN npm ci
 COPY --from=builder /app/dist ./dist
-COPY scripts ./scripts
-COPY entrypoint.sh /entrypoint.sh
+COPY backend/scripts ./scripts
+COPY backend/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
 ENV NODE_ENV=production
