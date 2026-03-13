@@ -29,7 +29,7 @@ import { fileURLToPath } from 'url';
 import { cleanAozoraText, splitIntoChunks } from './aozora.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DATA_DIR = process.env.DATA_DIR ?? path.join(__dirname, '../../data');
+const DATA_DIR = process.env.DATA_DIR ?? path.join(__dirname, '../data');
 const DB_PATH = process.env.DB_PATH ?? path.join(DATA_DIR, 'aozora.db');
 const CATALOG_URL =
   'https://raw.githubusercontent.com/aozorabunko/aozorabunko/master/index_pages/list_person_all_extended_utf8.zip';

@@ -1,13 +1,14 @@
+'use client';
+
 import { useState, useEffect, useCallback, useRef } from 'react';
-import SearchBox from './components/SearchBox.tsx';
-import ResultList from './components/ResultList.tsx';
-import type { SearchResponse, Stats } from './types.ts';
+import SearchBox from '@/components/SearchBox';
+import ResultList from '@/components/ResultList';
+import type { SearchResponse, Stats } from '@/types';
 
 const PAGE_SIZE = 20;
 const DEBOUNCE_MS = 400;
-const API_BASE = import.meta.env.VITE_API_BASE ?? '/api';
 
-export default function App() {
+export default function Home() {
   const [query, setQuery] = useState('');
   const [committedQuery, setCommittedQuery] = useState('');
   const [data, setData] = useState<SearchResponse | null>(null);
@@ -19,9 +20,8 @@ export default function App() {
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Fetch stats on mount
   useEffect(() => {
-    fetch(`${API_BASE}/stats`)
+    fetch('/api/stats')
       .then((r) => r.json())
       .then(setStats)
       .catch(() => {});
@@ -35,12 +35,12 @@ export default function App() {
 
     try {
       const res = await fetch(
-        `${API_BASE}/search?q=${encodeURIComponent(q)}&limit=${PAGE_SIZE}&offset=${offset}`
+        `/api/search?q=${encodeURIComponent(q)}&limit=${PAGE_SIZE}&offset=${offset}`
       );
-      const json: SearchResponse = await res.json();
+      const json = await res.json();
 
       if (!res.ok) {
-        setError((json as any).error ?? '検索エラー');
+        setError(json.error ?? '検索エラー');
         return;
       }
 
@@ -57,7 +57,6 @@ export default function App() {
     }
   }, [data]);
 
-  // Auto-search with debounce
   useEffect(() => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
     if (query.trim().length < 2) {
@@ -91,7 +90,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen">
-      {/* Sticky header */}
       <header className="sticky top-0 z-10 border-b border-stone-200 bg-white/90 backdrop-blur-md">
         <div className="mx-auto max-w-3xl px-4 py-4">
           <div className="mb-3 flex items-baseline gap-3">
@@ -112,7 +110,6 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main content */}
       <main className="mx-auto max-w-3xl px-4 py-6">
         {error && (
           <div className="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">

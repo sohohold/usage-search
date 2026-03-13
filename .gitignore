@@ -5,3 +5,6 @@ data/
 *.zip
 .env
 .DS_Store
+.next/
+out/
+*.tsbuildinfo
