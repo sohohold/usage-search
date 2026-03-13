@@ -1,4 +1,6 @@
-import React, { useEffect, useRef } from 'react';
+'use client';
+
+import { useEffect, useRef, type KeyboardEvent } from 'react';
 
 interface Props {
   value: string;
@@ -14,7 +16,7 @@ export default function SearchBox({ value, onChange, onSubmit, isLoading }: Prop
     inputRef.current?.focus();
   }, []);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
+  const handleKeyDown = (e: KeyboardEvent) => {
     if (e.key === 'Enter') onSubmit();
   };
 

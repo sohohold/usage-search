@@ -1,4 +1,4 @@
-import type { SearchResult } from '../types.ts';
+import type { SearchResult } from '@/types';
 
 interface Props {
   result: SearchResult;
@@ -12,7 +12,6 @@ export default function ResultCard({ result, index }: Props) {
                  transition hover:border-amber-300 hover:shadow-md"
       style={{ animationDelay: `${index * 30}ms` }}
     >
-      {/* Header */}
       <div className="mb-3 flex items-baseline justify-between gap-4">
         <div className="min-w-0">
           <a
@@ -38,7 +37,6 @@ export default function ResultCard({ result, index }: Props) {
         </a>
       </div>
 
-      {/* KWIC snippet */}
       <p
         className="font-serif text-[15px] leading-relaxed text-stone-700"
         dangerouslySetInnerHTML={{ __html: result.snippet }}

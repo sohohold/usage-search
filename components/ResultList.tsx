@@ -1,5 +1,5 @@
-import type { SearchResponse } from '../types.ts';
-import ResultCard from './ResultCard.tsx';
+import type { SearchResponse } from '@/types';
+import ResultCard from './ResultCard';
 
 interface Props {
   data: SearchResponse;
@@ -16,7 +16,6 @@ export default function ResultList({ data, onLoadMore, isLoadingMore, shownCount
 
   return (
     <div>
-      {/* Summary bar */}
       <div className="mb-4 flex items-center justify-between">
         <p className="text-sm text-stone-500">
           <span className="font-medium text-stone-700">「{query}」</span> の用例 —{' '}
@@ -27,14 +26,12 @@ export default function ResultList({ data, onLoadMore, isLoadingMore, shownCount
         </p>
       </div>
 
-      {/* Cards */}
       <div className="flex flex-col gap-3">
         {results.map((r, i) => (
           <ResultCard key={`${r.title}-${i}`} result={r} index={i} />
         ))}
       </div>
 
-      {/* Load more */}
       {hasMore && !over_limit && (
         <div className="mt-6 flex justify-center">
           <button

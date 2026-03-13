@@ -1,31 +1,22 @@
 import Database from 'better-sqlite3';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DB_PATH = process.env.DB_PATH || path.join(__dirname, '../../data/aozora.db');
+const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), 'data', 'aozora.db');
 
 let _db: Database.Database | null = null;
 
-export function getDb(): Database.Database {
+function getDb(): Database.Database {
   if (_db) return _db;
 
   _db = new Database(DB_PATH, { readonly: true });
 
-  // Performance tuning for read-heavy workload
   _db.pragma('journal_mode = WAL');
-  _db.pragma('cache_size = -65536'); // 64MB page cache
-  _db.pragma('mmap_size = 268435456'); // 256MB memory-mapped I/O
+  _db.pragma('cache_size = -65536');
+  _db.pragma('mmap_size = 268435456');
   _db.pragma('temp_store = MEMORY');
   _db.pragma('synchronous = OFF');
 
   return _db;
-}
-
-export interface Work {
-  title: string;
-  author: string;
-  card_url: string;
 }
 
 export interface SearchResult {
@@ -52,7 +43,6 @@ const COUNT_LIMIT = 1000;
 export function search(query: string, limit: number, offset: number): SearchResponse {
   const db = getDb();
 
-  // Phrase-quote for exact substring matching with trigram tokenizer
   const ftsQuery = `"${query.replace(/"/g, '""')}"`;
 
   const results = db
