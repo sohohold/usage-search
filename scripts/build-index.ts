@@ -17,7 +17,7 @@
  *   DATA_DIR  Path to store downloaded files (default: ../data)
  */
 
-import Database from 'better-sqlite3';
+import { createClient, type Client } from '@libsql/client';
 import { parse } from 'csv-parse/sync';
 import AdmZip from 'adm-zip';
 import iconv from 'iconv-lite';
@@ -114,16 +114,17 @@ async function pMap<T, R>(
 // Database setup
 // ---------------------------------------------------------------------------
 
-function setupDb(): Database.Database {
+async function setupDb(): Promise<Client> {
   fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
-  const db = new Database(DB_PATH);
 
-  db.pragma('journal_mode = WAL');
-  db.pragma('synchronous = NORMAL');
-  db.pragma('cache_size = -65536');
-  db.pragma('temp_store = MEMORY');
+  const client = createClient({ url: `file:${DB_PATH}` });
 
-  db.exec(`
+  await client.execute('PRAGMA journal_mode = WAL');
+  await client.execute('PRAGMA synchronous = NORMAL');
+  await client.execute('PRAGMA cache_size = -65536');
+  await client.execute('PRAGMA temp_store = MEMORY');
+
+  await client.execute(`
     CREATE TABLE IF NOT EXISTS works (
       id        INTEGER PRIMARY KEY AUTOINCREMENT,
       work_id   TEXT UNIQUE NOT NULL,
@@ -132,22 +133,24 @@ function setupDb(): Database.Database {
       card_url  TEXT,
       file_url  TEXT,
       encoding  TEXT
-    );
-
+    )
+  `);
+  await client.execute(`
     CREATE TABLE IF NOT EXISTS index_log (
       work_id   TEXT PRIMARY KEY,
       status    TEXT NOT NULL,
       indexed_at INTEGER NOT NULL
-    );
-
+    )
+  `);
+  await client.execute(`
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
       work_id UNINDEXED,
       text,
       tokenize = 'trigram'
-    );
+    )
   `);
 
-  return db;
+  return client;
 }
 
 // ---------------------------------------------------------------------------
@@ -231,7 +234,7 @@ function decodeText(buf: Buffer, encoding: string): string {
 
 async function main() {
   console.log(`DB: ${DB_PATH}`);
-  const db = setupDb();
+  const client = await setupDb();
 
   const csvBuffer = await downloadCatalog();
   let works = parseCatalog(csvBuffer);
@@ -243,27 +246,15 @@ async function main() {
   }
 
   if (RESUME) {
-    const indexed = new Set(
-      db
-        .prepare<[string], { work_id: string }>('SELECT work_id FROM index_log WHERE status = ?')
-        .all('ok')
-        .map((r) => r.work_id)
-    );
+    const result = await client.execute({
+      sql: 'SELECT work_id FROM index_log WHERE status = ?',
+      args: ['ok'],
+    });
+    const indexed = new Set(result.rows.map((r) => r.work_id as string));
     const before = works.length;
     works = works.filter((w) => !indexed.has(w.work_id));
     console.log(`Resuming: skipping ${before - works.length} already-indexed works`);
   }
-
-  const insertWork = db.prepare(
-    `INSERT OR IGNORE INTO works (work_id, title, author, card_url, file_url, encoding)
-     VALUES (@work_id, @title, @author, @card_url, @file_url, @encoding)`
-  );
-  const insertChunk = db.prepare(
-    `INSERT INTO chunks (work_id, text) VALUES (?, ?)`
-  );
-  const logStatus = db.prepare(
-    `INSERT OR REPLACE INTO index_log (work_id, status, indexed_at) VALUES (?, ?, ?)`
-  );
 
   let done = 0;
   let errors = 0;
@@ -279,38 +270,68 @@ async function main() {
         const txtUrl = textUrlFromFileUrl(work.file_url);
         if (!txtUrl) {
           console.error(`\nSkipping [${work.work_id}]: unrecognized file_url format: ${work.file_url}`);
-          logStatus.run(work.work_id, 'skip', Date.now());
+          await client.execute({
+            sql: 'INSERT OR REPLACE INTO index_log (work_id, status, indexed_at) VALUES (?, ?, ?)',
+            args: [work.work_id, 'skip', Date.now()],
+          });
           return;
         }
         await downloadWithRetry(txtUrl, tempPath);
         const rawText = decodeText(fs.readFileSync(tempPath), work.encoding);
 
         if (!rawText) {
-          logStatus.run(work.work_id, 'no_text', Date.now());
+          await client.execute({
+            sql: 'INSERT OR REPLACE INTO index_log (work_id, status, indexed_at) VALUES (?, ?, ?)',
+            args: [work.work_id, 'no_text', Date.now()],
+          });
           return;
         }
 
         const cleaned = cleanAozoraText(rawText);
         const chunks = splitIntoChunks(cleaned);
         if (chunks.length === 0) {
-          logStatus.run(work.work_id, 'empty', Date.now());
+          await client.execute({
+            sql: 'INSERT OR REPLACE INTO index_log (work_id, status, indexed_at) VALUES (?, ?, ?)',
+            args: [work.work_id, 'empty', Date.now()],
+          });
           return;
         }
 
-        db.transaction(() => {
-          insertWork.run(work);
-          const row = db
-            .prepare<[string], { id: number }>('SELECT id FROM works WHERE work_id = ?')
-            .get(work.work_id);
-          if (!row) throw new Error(`work not found after insert: ${work.work_id}`);
+        // Use a transaction to insert work + chunks atomically
+        const tx = await client.transaction('write');
+        try {
+          await tx.execute({
+            sql: `INSERT OR IGNORE INTO works (work_id, title, author, card_url, file_url, encoding)
+                  VALUES (?, ?, ?, ?, ?, ?)`,
+            args: [work.work_id, work.title, work.author, work.card_url, work.file_url, work.encoding],
+          });
+          const row = await tx.execute({
+            sql: 'SELECT id FROM works WHERE work_id = ?',
+            args: [work.work_id],
+          });
+          if (row.rows.length === 0) throw new Error(`work not found after insert: ${work.work_id}`);
+          const workId = String(row.rows[0].id);
           for (const chunk of chunks) {
-            insertChunk.run(String(row.id), chunk);
+            await tx.execute({
+              sql: 'INSERT INTO chunks (work_id, text) VALUES (?, ?)',
+              args: [workId, chunk],
+            });
           }
-          logStatus.run(work.work_id, 'ok', Date.now());
-        })();
+          await tx.execute({
+            sql: 'INSERT OR REPLACE INTO index_log (work_id, status, indexed_at) VALUES (?, ?, ?)',
+            args: [work.work_id, 'ok', Date.now()],
+          });
+          await tx.commit();
+        } catch (e) {
+          await tx.rollback();
+          throw e;
+        }
       } catch (err) {
         errors++;
-        logStatus.run(work.work_id, 'error', Date.now());
+        await client.execute({
+          sql: 'INSERT OR REPLACE INTO index_log (work_id, status, indexed_at) VALUES (?, ?, ?)',
+          args: [work.work_id, 'error', Date.now()],
+        }).catch(() => {});
         if (errors <= 3) {
           console.error(`\nError [${work.work_id}] file_url=${work.file_url}: ${err instanceof Error ? err.message : err}`);
         }
@@ -330,13 +351,13 @@ async function main() {
   );
 
   console.log('\nOptimizing FTS index...');
-  db.exec("INSERT INTO chunks(chunks) VALUES('optimize')");
+  await client.execute("INSERT INTO chunks(chunks) VALUES('optimize')");
 
-  const { works: wCount } = db.prepare<[], { works: number }>('SELECT count(*) AS works FROM works').get()!;
-  const { chunks: cCount } = db.prepare<[], { chunks: number }>('SELECT count(*) AS chunks FROM chunks').get()!;
-  console.log(`Done! Indexed ${wCount} works, ${cCount} chunks. Errors: ${errors}`);
+  const wRes = await client.execute('SELECT count(*) AS works FROM works');
+  const cRes = await client.execute('SELECT count(*) AS chunks FROM chunks');
+  console.log(`Done! Indexed ${wRes.rows[0].works} works, ${cRes.rows[0].chunks} chunks. Errors: ${errors}`);
 
-  db.close();
+  client.close();
 }
 
 main().catch((err) => {
