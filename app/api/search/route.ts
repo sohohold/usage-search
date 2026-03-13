@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { search } from '@/lib/db';
 
-export function GET(request: NextRequest) {
+export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const q = searchParams.get('q')?.trim() ?? '';
   const limit = Math.min(Math.max(parseInt(searchParams.get('limit') ?? '20'), 1), 50);
@@ -12,7 +12,7 @@ export function GET(request: NextRequest) {
   }
 
   try {
-    const result = search(q, limit, offset);
+    const result = await search(q, limit, offset);
     return NextResponse.json(result);
   } catch (err) {
     console.error('Search error:', err);

@@ -1,22 +1,16 @@
-import Database from 'better-sqlite3';
-import path from 'path';
+import { createClient, type Client } from '@libsql/client';
 
-const DB_PATH = process.env.DB_PATH || path.join(process.cwd(), 'data', 'aozora.db');
+let _client: Client | null = null;
 
-let _db: Database.Database | null = null;
+function getClient(): Client {
+  if (_client) return _client;
 
-function getDb(): Database.Database {
-  if (_db) return _db;
+  _client = createClient({
+    url: process.env.TURSO_DATABASE_URL!,
+    authToken: process.env.TURSO_AUTH_TOKEN,
+  });
 
-  _db = new Database(DB_PATH, { readonly: true });
-
-  _db.pragma('journal_mode = WAL');
-  _db.pragma('cache_size = -65536');
-  _db.pragma('mmap_size = 268435456');
-  _db.pragma('temp_store = MEMORY');
-  _db.pragma('synchronous = OFF');
-
-  return _db;
+  return _client;
 }
 
 export interface SearchResult {
@@ -40,30 +34,37 @@ export interface Stats {
 
 const COUNT_LIMIT = 1000;
 
-export function search(query: string, limit: number, offset: number): SearchResponse {
-  const db = getDb();
-
+export async function search(query: string, limit: number, offset: number): Promise<SearchResponse> {
+  const client = getClient();
   const ftsQuery = `"${query.replace(/"/g, '""')}"`;
 
-  const results = db
-    .prepare<[string, number, number], SearchResult>(
-      `SELECT w.title, w.author, w.card_url,
+  const [resultsRes, countRes] = await Promise.all([
+    client.execute({
+      sql: `SELECT w.title, w.author, w.card_url,
               snippet(chunks, 1, '<mark>', '</mark>', '…', 24) AS snippet
        FROM chunks
        JOIN works w ON chunks.work_id = CAST(w.id AS TEXT)
        WHERE chunks MATCH ?
        ORDER BY bm25(chunks)
-       LIMIT ? OFFSET ?`
-    )
-    .all(ftsQuery, limit, offset);
-
-  const { count } = db
-    .prepare<[string, number], { count: number }>(
-      `SELECT count(*) AS count FROM (
+       LIMIT ? OFFSET ?`,
+      args: [ftsQuery, limit, offset],
+    }),
+    client.execute({
+      sql: `SELECT count(*) AS count FROM (
          SELECT 1 FROM chunks WHERE chunks MATCH ? LIMIT ?
-       )`
-    )
-    .get(ftsQuery, COUNT_LIMIT + 1)!;
+       )`,
+      args: [ftsQuery, COUNT_LIMIT + 1],
+    }),
+  ]);
+
+  const results = resultsRes.rows.map((row) => ({
+    title: row.title as string,
+    author: row.author as string,
+    card_url: row.card_url as string,
+    snippet: row.snippet as string,
+  }));
+
+  const count = countRes.rows[0].count as number;
 
   return {
     query,
@@ -73,13 +74,16 @@ export function search(query: string, limit: number, offset: number): SearchResp
   };
 }
 
-export function getStats(): Stats {
-  const db = getDb();
-  const { works } = db
-    .prepare<[], { works: number }>('SELECT count(*) AS works FROM works')
-    .get()!;
-  const { chunks } = db
-    .prepare<[], { chunks: number }>('SELECT count(*) AS chunks FROM chunks')
-    .get()!;
-  return { works, chunks };
+export async function getStats(): Promise<Stats> {
+  const client = getClient();
+
+  const [worksRes, chunksRes] = await Promise.all([
+    client.execute('SELECT count(*) AS works FROM works'),
+    client.execute('SELECT count(*) AS chunks FROM chunks'),
+  ]);
+
+  return {
+    works: worksRes.rows[0].works as number,
+    chunks: chunksRes.rows[0].chunks as number,
+  };
 }

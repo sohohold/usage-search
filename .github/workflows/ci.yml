@@ -54,11 +54,11 @@ jobs:
           echo "--- DB stats ---"
           sqlite3 data/aozora.db "SELECT count(*) || ' works' FROM works; SELECT count(*) || ' chunks' FROM chunks;"
 
-      # Start Next.js dev server and run search tests
+      # Start Next.js dev server using local SQLite via libsql file: URL
       - name: Start server
         run: npm run dev &
         env:
-          DB_PATH: ./data/aozora.db
+          TURSO_DATABASE_URL: file:./data/aozora.db
           PORT: "3000"
 
       - name: Wait for server
