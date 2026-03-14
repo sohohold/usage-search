@@ -5,20 +5,10 @@ let _client: Client | null = null;
 function getClient(): Client {
   if (_client) return _client;
 
-  const url = process.env.TURSO_DATABASE_URL!;
-  const authToken = process.env.TURSO_AUTH_TOKEN;
-
-  // Use embedded replica for remote databases to avoid network round-trips
-  if (url.startsWith('libsql://') || url.startsWith('https://')) {
-    _client = createClient({
-      url: 'file:/tmp/aozora-replica.db',
-      syncUrl: url,
-      authToken,
-      syncInterval: 60,
-    });
-  } else {
-    _client = createClient({ url, authToken });
-  }
+  _client = createClient({
+    url: process.env.TURSO_DATABASE_URL!,
+    authToken: process.env.TURSO_AUTH_TOKEN,
+  });
 
   return _client;
 }
