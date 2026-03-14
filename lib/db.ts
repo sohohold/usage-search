@@ -5,10 +5,20 @@ let _client: Client | null = null;
 function getClient(): Client {
   if (_client) return _client;
 
-  _client = createClient({
-    url: process.env.TURSO_DATABASE_URL!,
-    authToken: process.env.TURSO_AUTH_TOKEN,
-  });
+  const url = process.env.TURSO_DATABASE_URL!;
+  const authToken = process.env.TURSO_AUTH_TOKEN;
+
+  // Use embedded replica for remote databases to avoid network round-trips
+  if (url.startsWith('libsql://') || url.startsWith('https://')) {
+    _client = createClient({
+      url: 'file:/tmp/aozora-replica.db',
+      syncUrl: url,
+      authToken,
+      syncInterval: 60,
+    });
+  } else {
+    _client = createClient({ url, authToken });
+  }
 
   return _client;
 }
@@ -32,44 +42,38 @@ export interface Stats {
   chunks: number;
 }
 
-const COUNT_LIMIT = 1000;
+const COUNT_LIMIT = 200;
 
 export async function search(query: string, limit: number, offset: number): Promise<SearchResponse> {
   const client = getClient();
   const ftsQuery = `"${query.replace(/"/g, '""')}"`;
 
-  const [resultsRes, countRes] = await Promise.all([
-    client.execute({
-      sql: `SELECT w.title, w.author, w.card_url,
-              snippet(chunks, 1, '<mark>', '</mark>', '…', 24) AS snippet
-       FROM chunks
-       JOIN works w ON chunks.work_id = CAST(w.id AS TEXT)
-       WHERE chunks MATCH ?
-       ORDER BY bm25(chunks)
-       LIMIT ? OFFSET ?`,
-      args: [ftsQuery, limit, offset],
-    }),
-    client.execute({
-      sql: `SELECT count(*) AS count FROM (
-         SELECT 1 FROM chunks WHERE chunks MATCH ? LIMIT ?
-       )`,
-      args: [ftsQuery, COUNT_LIMIT + 1],
-    }),
-  ]);
+  // Fetch limit+1 rows so we can detect if more results exist without a separate COUNT query
+  const resultsRes = await client.execute({
+    sql: `SELECT w.title, w.author, w.card_url,
+            snippet(chunks, 1, '<mark>', '</mark>', '…', 24) AS snippet
+     FROM chunks
+     JOIN works w ON chunks.work_id = CAST(w.id AS TEXT)
+     WHERE chunks MATCH ?
+     ORDER BY bm25(chunks)
+     LIMIT ? OFFSET ?`,
+    args: [ftsQuery, limit + 1, offset],
+  });
 
-  const results = resultsRes.rows.map((row) => ({
+  const hasMore = resultsRes.rows.length > limit;
+  const rows = hasMore ? resultsRes.rows.slice(0, limit) : resultsRes.rows;
+
+  const results = rows.map((row) => ({
     title: row.title as string,
     author: row.author as string,
     card_url: row.card_url as string,
     snippet: row.snippet as string,
   }));
 
-  const count = countRes.rows[0].count as number;
-
   return {
     query,
-    total: Math.min(count, COUNT_LIMIT),
-    over_limit: count > COUNT_LIMIT,
+    total: offset + results.length + (hasMore ? 1 : 0),
+    over_limit: hasMore,
     results,
   };
 }
