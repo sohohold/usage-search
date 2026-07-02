@@ -88,7 +88,9 @@ export default function Home() {
   };
 
   const handleLoadMore = () => {
-    if (!data) return;
+    // While a new search is in flight, data still holds the previous query's
+    // results; paging it would abort the new request and append stale rows.
+    if (!data || isLoading) return;
     fetchResults(data.query, data.results.length, true);
   };
 
@@ -140,7 +142,7 @@ export default function Home() {
             <ResultList
               data={data}
               onLoadMore={handleLoadMore}
-              isLoadingMore={isLoadingMore}
+              isLoadingMore={isLoadingMore || isLoading}
             />
           </div>
         )}
