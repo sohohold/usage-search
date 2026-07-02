@@ -1,4 +1,5 @@
 import { createClient, type Client } from '@libsql/client';
+import type { SearchResponse, Stats } from '@/types';
 
 let _client: Client | null = null;
 
@@ -13,39 +14,21 @@ function getClient(): Client {
   return _client;
 }
 
-export interface SearchResult {
-  title: string;
-  author: string;
-  card_url: string;
-  snippet: string;
-}
-
-export interface SearchResponse {
-  query: string;
-  total: number;
-  over_limit: boolean;
-  results: SearchResult[];
-}
-
-export interface Stats {
-  works: number;
-  chunks: number;
-}
-
-const COUNT_LIMIT = 200;
-
 export async function search(query: string, limit: number, offset: number): Promise<SearchResponse> {
   const client = getClient();
   const ftsQuery = `"${query.replace(/"/g, '""')}"`;
 
-  // Fetch limit+1 rows so we can detect if more results exist without a separate COUNT query
+  // Fetch limit+1 rows so we can detect if more results exist without a separate COUNT query.
+  // ORDER BY rank (not bm25()) lets FTS5 use its optimized ranking path, so snippet() runs
+  // only on returned rows. The CAST must stay on the chunks side of the join: chunks.work_id
+  // stores a stringified works.id, and casting w.id instead would defeat the works PK index.
   const resultsRes = await client.execute({
     sql: `SELECT w.title, w.author, w.card_url,
             snippet(chunks, 1, '<mark>', '</mark>', '…', 24) AS snippet
      FROM chunks
-     JOIN works w ON chunks.work_id = CAST(w.id AS TEXT)
+     JOIN works w ON w.id = CAST(chunks.work_id AS INTEGER)
      WHERE chunks MATCH ?
-     ORDER BY bm25(chunks)
+     ORDER BY rank
      LIMIT ? OFFSET ?`,
     args: [ftsQuery, limit + 1, offset],
   });
@@ -62,7 +45,6 @@ export async function search(query: string, limit: number, offset: number): Prom
 
   return {
     query,
-    total: offset + results.length + (hasMore ? 1 : 0),
     over_limit: hasMore,
     results,
   };

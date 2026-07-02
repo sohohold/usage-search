@@ -3,22 +3,20 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import SearchBox from '@/components/SearchBox';
 import ResultList from '@/components/ResultList';
-import type { SearchResponse, Stats } from '@/types';
+import { MIN_QUERY_LENGTH, PAGE_SIZE, type SearchResponse, type Stats } from '@/types';
 
-const PAGE_SIZE = 20;
 const DEBOUNCE_MS = 400;
 
 export default function Home() {
   const [query, setQuery] = useState('');
-  const [committedQuery, setCommittedQuery] = useState('');
   const [data, setData] = useState<SearchResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
-  const [shownCount, setShownCount] = useState(PAGE_SIZE);
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     fetch('/api/stats')
@@ -28,14 +26,20 @@ export default function Home() {
   }, []);
 
   const fetchResults = useCallback(async (q: string, offset = 0, append = false) => {
-    if (q.trim().length < 2) return;
-    const loading = append ? setIsLoadingMore : setIsLoading;
-    loading(true);
+    if (q.length < MIN_QUERY_LENGTH) return;
+
+    // Cancel any in-flight request so a slow earlier query can't overwrite newer results.
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    (append ? setIsLoadingMore : setIsLoading)(true);
     setError(null);
 
     try {
       const res = await fetch(
-        `/api/search?q=${encodeURIComponent(q)}&limit=${PAGE_SIZE}&offset=${offset}`
+        `/api/search?q=${encodeURIComponent(q)}&limit=${PAGE_SIZE}&offset=${offset}`,
+        { signal: controller.signal }
       );
       const json = await res.json();
 
@@ -44,48 +48,48 @@ export default function Home() {
         return;
       }
 
-      if (append && data) {
-        setData({ ...json, results: [...data.results, ...json.results] });
-      } else {
-        setData(json);
-        setShownCount(json.results.length);
+      setData((prev) =>
+        append && prev ? { ...json, results: [...prev.results, ...json.results] } : json
+      );
+    } catch (err) {
+      if (!(err instanceof DOMException && err.name === 'AbortError')) {
+        setError('サーバーに接続できませんでした');
       }
-    } catch {
-      setError('サーバーに接続できませんでした');
     } finally {
-      loading(false);
+      // Only the still-current request may clear loading state; an aborted one
+      // would otherwise hide the spinner of the request that superseded it.
+      if (abortRef.current === controller) {
+        abortRef.current = null;
+        setIsLoading(false);
+        setIsLoadingMore(false);
+      }
     }
-  }, [data]);
+  }, []);
 
   useEffect(() => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    if (query.trim().length < 2) {
+    const q = query.trim();
+    if (q.length < MIN_QUERY_LENGTH) {
+      abortRef.current?.abort();
       setData(null);
       setError(null);
       return;
     }
-    debounceTimer.current = setTimeout(() => {
-      setCommittedQuery(query.trim());
-      fetchResults(query.trim());
-    }, DEBOUNCE_MS);
+    debounceTimer.current = setTimeout(() => fetchResults(q), DEBOUNCE_MS);
 
     return () => {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
     };
-  }, [query]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [query, fetchResults]);
 
   const handleSubmit = () => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    const q = query.trim();
-    if (q.length < 2) return;
-    setCommittedQuery(q);
-    fetchResults(q);
+    fetchResults(query.trim());
   };
 
   const handleLoadMore = () => {
-    const offset = data?.results.length ?? 0;
-    setShownCount((n) => n + PAGE_SIZE);
-    fetchResults(committedQuery, offset, true);
+    if (!data) return;
+    fetchResults(data.query, data.results.length, true);
   };
 
   return (
@@ -131,13 +135,14 @@ export default function Home() {
           </div>
         )}
 
-        {data && !isLoading && (
-          <ResultList
-            data={data}
-            onLoadMore={handleLoadMore}
-            isLoadingMore={isLoadingMore}
-            shownCount={shownCount}
-          />
+        {data && (
+          <div className={`transition-opacity ${isLoading ? 'opacity-50' : ''}`}>
+            <ResultList
+              data={data}
+              onLoadMore={handleLoadMore}
+              isLoadingMore={isLoadingMore}
+            />
+          </div>
         )}
       </main>
     </div>

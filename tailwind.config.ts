@@ -5,8 +5,8 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['"Noto Sans JP"', 'system-ui', 'sans-serif'],
-        serif: ['"Noto Serif JP"', 'Georgia', 'serif'],
+        sans: ['var(--font-noto-sans)', '"Noto Sans JP"', 'system-ui', 'sans-serif'],
+        serif: ['var(--font-noto-serif)', '"Noto Serif JP"', 'Georgia', 'serif'],
       },
     },
   },
