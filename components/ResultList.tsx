@@ -5,10 +5,9 @@ interface Props {
   data: SearchResponse;
   onLoadMore: () => void;
   isLoadingMore: boolean;
-  shownCount: number;
 }
 
-export default function ResultList({ data, onLoadMore, isLoadingMore, shownCount }: Props) {
+export default function ResultList({ data, onLoadMore, isLoadingMore }: Props) {
   const { query, over_limit, results } = data;
 
   const countLabel = over_limit
@@ -26,7 +25,7 @@ export default function ResultList({ data, onLoadMore, isLoadingMore, shownCount
 
       <div className="flex flex-col gap-3">
         {results.map((r, i) => (
-          <ResultCard key={`${r.title}-${i}`} result={r} index={i} />
+          <ResultCard key={`${r.title}-${i}`} result={r} />
         ))}
       </div>
 

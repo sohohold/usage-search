@@ -1,3 +1,7 @@
+// The FTS index uses trigram tokenization, so queries under 3 characters can never match.
+export const MIN_QUERY_LENGTH = 3;
+export const PAGE_SIZE = 20;
+
 export interface SearchResult {
   title: string;
   author: string;
@@ -7,7 +11,6 @@ export interface SearchResult {
 
 export interface SearchResponse {
   query: string;
-  total: number;
   over_limit: boolean;
   results: SearchResult[];
 }

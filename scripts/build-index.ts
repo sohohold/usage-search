@@ -93,6 +93,13 @@ async function downloadWithRetry(url: string, dest: string): Promise<void> {
   }
 }
 
+function logStatus(db: Pick<Client, 'execute'>, workId: string, status: string) {
+  return db.execute({
+    sql: 'INSERT OR REPLACE INTO index_log (work_id, status, indexed_at) VALUES (?, ?, ?)',
+    args: [workId, status, Date.now()],
+  });
+}
+
 async function pMap<T, R>(
   items: T[],
   fn: (item: T, index: number) => Promise<R>,
@@ -161,8 +168,6 @@ interface CatalogRow {
   work_id: string;
   title: string;
   author: string;
-  copyright: string;
-  author_copyright: string;
   card_url: string;
   file_url: string;
   encoding: string;
@@ -198,8 +203,6 @@ function parseCatalog(csvBuffer: Buffer): CatalogRow[] {
       work_id: r['作品ID'],
       title: r['作品名'],
       author: `${r['姓']}　${r['名']}`.trim(),
-      copyright: r['作品著作権フラグ'],
-      author_copyright: r['人物著作権フラグ'],
       card_url: r['図書カードURL'],
       file_url: r['テキストファイルURL'],
       encoding: r['テキストファイル符号化方式'] ?? 'ShiftJIS',
@@ -270,30 +273,21 @@ async function main() {
         const txtUrl = textUrlFromFileUrl(work.file_url);
         if (!txtUrl) {
           console.error(`\nSkipping [${work.work_id}]: unrecognized file_url format: ${work.file_url}`);
-          await client.execute({
-            sql: 'INSERT OR REPLACE INTO index_log (work_id, status, indexed_at) VALUES (?, ?, ?)',
-            args: [work.work_id, 'skip', Date.now()],
-          });
+          await logStatus(client, work.work_id, 'skip');
           return;
         }
         await downloadWithRetry(txtUrl, tempPath);
         const rawText = decodeText(fs.readFileSync(tempPath), work.encoding);
 
         if (!rawText) {
-          await client.execute({
-            sql: 'INSERT OR REPLACE INTO index_log (work_id, status, indexed_at) VALUES (?, ?, ?)',
-            args: [work.work_id, 'no_text', Date.now()],
-          });
+          await logStatus(client, work.work_id, 'no_text');
           return;
         }
 
         const cleaned = cleanAozoraText(rawText);
         const chunks = splitIntoChunks(cleaned);
         if (chunks.length === 0) {
-          await client.execute({
-            sql: 'INSERT OR REPLACE INTO index_log (work_id, status, indexed_at) VALUES (?, ?, ?)',
-            args: [work.work_id, 'empty', Date.now()],
-          });
+          await logStatus(client, work.work_id, 'empty');
           return;
         }
 
@@ -311,16 +305,13 @@ async function main() {
           });
           if (row.rows.length === 0) throw new Error(`work not found after insert: ${work.work_id}`);
           const workId = String(row.rows[0].id);
-          for (const chunk of chunks) {
-            await tx.execute({
+          await tx.batch(
+            chunks.map((chunk) => ({
               sql: 'INSERT INTO chunks (work_id, text) VALUES (?, ?)',
               args: [workId, chunk],
-            });
-          }
-          await tx.execute({
-            sql: 'INSERT OR REPLACE INTO index_log (work_id, status, indexed_at) VALUES (?, ?, ?)',
-            args: [work.work_id, 'ok', Date.now()],
-          });
+            }))
+          );
+          await logStatus(tx, work.work_id, 'ok');
           await tx.commit();
         } catch (e) {
           await tx.rollback();
@@ -328,10 +319,7 @@ async function main() {
         }
       } catch (err) {
         errors++;
-        await client.execute({
-          sql: 'INSERT OR REPLACE INTO index_log (work_id, status, indexed_at) VALUES (?, ?, ?)',
-          args: [work.work_id, 'error', Date.now()],
-        }).catch(() => {});
+        await logStatus(client, work.work_id, 'error').catch(() => {});
         if (errors <= 3) {
           console.error(`\nError [${work.work_id}] file_url=${work.file_url}: ${err instanceof Error ? err.message : err}`);
         }

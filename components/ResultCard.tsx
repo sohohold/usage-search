@@ -2,15 +2,13 @@ import type { SearchResult } from '@/types';
 
 interface Props {
   result: SearchResult;
-  index: number;
 }
 
-export default function ResultCard({ result, index }: Props) {
+export default function ResultCard({ result }: Props) {
   return (
     <article
       className="group rounded-xl border border-stone-200 bg-white p-5 shadow-sm
                  transition hover:border-amber-300 hover:shadow-md"
-      style={{ animationDelay: `${index * 30}ms` }}
     >
       <div className="mb-3 flex items-baseline justify-between gap-4">
         <div className="min-w-0">
