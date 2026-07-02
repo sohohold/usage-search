@@ -7,6 +7,8 @@ export interface SearchResult {
   author: string;
   card_url: string;
   snippet: string;
+  // Wider excerpt around the same match (~2.7x the snippet), shown when a card is expanded.
+  context: string;
 }
 
 export interface SearchResponse {

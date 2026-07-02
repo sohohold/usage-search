@@ -24,7 +24,8 @@ export async function search(query: string, limit: number, offset: number): Prom
   // stores a stringified works.id, and casting w.id instead would defeat the works PK index.
   const resultsRes = await client.execute({
     sql: `SELECT w.title, w.author, w.card_url,
-            snippet(chunks, 1, '<mark>', '</mark>', '…', 24) AS snippet
+            snippet(chunks, 1, '<mark>', '</mark>', '…', 24) AS snippet,
+            snippet(chunks, 1, '<mark>', '</mark>', '…', 64) AS context
      FROM chunks
      JOIN works w ON w.id = CAST(chunks.work_id AS INTEGER)
      WHERE chunks MATCH ?
@@ -41,6 +42,7 @@ export async function search(query: string, limit: number, offset: number): Prom
     author: row.author as string,
     card_url: row.card_url as string,
     snippet: row.snippet as string,
+    context: row.context as string,
   }));
 
   return {
