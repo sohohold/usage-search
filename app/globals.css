@@ -1,6 +1,9 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Noto Sans JP", system-ui, sans-serif;
+  --font-serif: "Noto Serif JP", Georgia, serif;
+}
 
 @layer base {
   body {
