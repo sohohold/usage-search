@@ -85,7 +85,6 @@ npm run build && npm run start   # 本番ビルド・起動
 | `npm run dev` | 開発サーバー起動 |
 | `npm run build` | 本番ビルド |
 | `npm run start` | 本番サーバー起動 |
-| `npm run lint` | ESLint（next lint） |
 | `npm run index` | インデクサー実行（`scripts/build-index.ts`） |
 
 ## 検索仕様
