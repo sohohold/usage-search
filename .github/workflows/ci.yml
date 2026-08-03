@@ -24,6 +24,9 @@ jobs:
       - name: Type-check
         run: npx tsc --noEmit
 
+      - name: Test
+        run: npm test
+
       - name: Build
         run: npm run build
 
@@ -53,6 +56,15 @@ jobs:
           ls -lh data/aozora.db
           echo "--- DB stats ---"
           sqlite3 data/aozora.db "SELECT count(*) || ' works' FROM works; SELECT count(*) || ' chunks' FROM chunks;"
+
+      # The unit tests cover this on fixtures; here it is checked against real
+      # downloaded texts, where the markup and legend blocks actually come from.
+      - name: Verify indexed text is free of Aozora markup
+        run: |
+          RESIDUE=$(sqlite3 data/aozora.db \
+            "SELECT count(*) FROM chunks WHERE text LIKE '%［＃%' OR text LIKE '%《%' OR text LIKE '%テキスト中に現れる記号について%';")
+          echo "chunks containing markup or legend text: $RESIDUE"
+          [ "$RESIDUE" = "0" ] || exit 1
 
       # Start Next.js dev server using local SQLite via libsql file: URL
       - name: Start server
