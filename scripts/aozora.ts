@@ -9,14 +9,33 @@
  * - Splitting into searchable paragraphs
  */
 
-/** Remove Aozora Bunko header (metadata before the horizontal rule) */
+const RULE_RE = /^-{4,}[ \t]*\r?\n/m;
+const LEGEND_HEADING = '【テキスト中に現れる記号について】';
+
+/**
+ * Remove the Aozora Bunko header (title, author, and the notation legend).
+ *
+ * The standard layout puts a legend block between two rules:
+ *
+ *     こころ / 夏目漱石
+ *     -------------------
+ *     【テキスト中に現れる記号について】  ← must not be indexed as body text
+ *     -------------------
+ *     （本文）
+ *
+ * so when a legend is present the header runs to the *second* rule. Works
+ * without a legend have a single rule, and some have none at all.
+ */
 function stripHeader(text: string): string {
-  // Header ends at the first line of dashes (--------)
-  const match = text.match(/^-{4,}\r?\n/m);
-  if (match?.index !== undefined) {
-    return text.slice(match.index + match[0].length);
+  const first = text.match(RULE_RE);
+  if (first?.index === undefined) return text;
+
+  const afterFirst = text.slice(first.index + first[0].length);
+  const second = afterFirst.match(RULE_RE);
+  if (second?.index !== undefined && afterFirst.slice(0, second.index).includes(LEGEND_HEADING)) {
+    return afterFirst.slice(second.index + second[0].length);
   }
-  return text;
+  return afterFirst;
 }
 
 /** Remove Aozora Bunko footer (bibliographic info after the body) */
@@ -39,12 +58,17 @@ function stripRuby(text: string): string {
   return text;
 }
 
-/** Remove Aozora markup tags like [#「○」入力者注 …] */
+/**
+ * Remove Aozora markup tags like ［＃「○」に傍点］ and gaiji markers like
+ * ※［＃「てへん＋劣」、第3水準1-84-77］.
+ *
+ * Real Aozora texts write these with full-width brackets; the half-width form
+ * is handled too so older or hand-edited sources stay covered. The optional
+ * leading ※ is part of the match so no stray marker is left behind.
+ */
 function stripMarkup(text: string): string {
-  // ※[#...] markers
-  text = text.replace(/※\[#[^\]]*\]/g, '');
-  // [#...] tags
-  text = text.replace(/\[#[^\]]*\]/g, '');
+  text = text.replace(/※?［＃[^］]*］/g, '');
+  text = text.replace(/※?\[#[^\]]*\]/g, '');
   return text;
 }
 
@@ -68,8 +92,20 @@ export function cleanAozoraText(raw: string): string {
   return text;
 }
 
-const MIN_CHUNK_LENGTH = 15;
-const MAX_CHUNK_LENGTH = 400;
+/** Paragraphs shorter than this carry no useful context, so they are not indexed. */
+export const MIN_CHUNK_LENGTH = 15;
+/** A chunk is one result card, so it must stay short enough to display. */
+export const MAX_CHUNK_LENGTH = 400;
+
+/** Cut a run of text into pieces no longer than MAX_CHUNK_LENGTH. */
+function splitAtMaxLength(part: string): string[] {
+  if (part.length <= MAX_CHUNK_LENGTH) return [part];
+  const pieces: string[] = [];
+  for (let i = 0; i < part.length; i += MAX_CHUNK_LENGTH) {
+    pieces.push(part.slice(i, i + MAX_CHUNK_LENGTH));
+  }
+  return pieces;
+}
 
 /**
  * Split cleaned text into paragraph chunks suitable for FTS indexing.
@@ -88,9 +124,11 @@ export function splitIntoChunks(text: string): string[] {
       continue;
     }
 
-    // Split long paragraphs at sentence boundaries
+    // Split long paragraphs at sentence boundaries. A single sentence can still
+    // exceed the limit (or the paragraph may have no sentence breaks at all), so
+    // oversized pieces are cut at the limit before accumulating.
     let current = '';
-    for (const part of trimmed.split(/(?<=[。！？」』])/)) {
+    for (const part of trimmed.split(/(?<=[。！？」』])/).flatMap(splitAtMaxLength)) {
       if (current.length + part.length > MAX_CHUNK_LENGTH && current.length >= MIN_CHUNK_LENGTH) {
         chunks.push(current.trim());
         current = part;

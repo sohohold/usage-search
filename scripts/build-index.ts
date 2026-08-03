@@ -18,15 +18,14 @@
  */
 
 import { createClient, type Client } from '@libsql/client';
-import { parse } from 'csv-parse/sync';
 import AdmZip from 'adm-zip';
-import iconv from 'iconv-lite';
 import fs from 'fs';
 import path from 'path';
 import https from 'https';
 import http from 'http';
 import { fileURLToPath } from 'url';
 import { cleanAozoraText, splitIntoChunks } from './aozora.js';
+import { decodeText, pMap, parseCatalog, textUrlFromFileUrl, withRetry } from './catalog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR ?? path.join(__dirname, '../data');
@@ -42,7 +41,6 @@ const LIMIT = (() => {
 })();
 const RESUME = args.includes('--resume');
 const CONCURRENCY = 5;
-const RETRY_DELAYS = [1000, 2000, 4000];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -81,16 +79,8 @@ function download(url: string, dest: string): Promise<void> {
   });
 }
 
-async function downloadWithRetry(url: string, dest: string): Promise<void> {
-  for (let attempt = 0; attempt <= RETRY_DELAYS.length; attempt++) {
-    try {
-      await download(url, dest);
-      return;
-    } catch (err) {
-      if (attempt === RETRY_DELAYS.length) throw err;
-      await new Promise((r) => setTimeout(r, RETRY_DELAYS[attempt]));
-    }
-  }
+function downloadWithRetry(url: string, dest: string): Promise<void> {
+  return withRetry(() => download(url, dest));
 }
 
 function logStatus(db: Pick<Client, 'execute'>, workId: string, status: string) {
@@ -98,23 +88,6 @@ function logStatus(db: Pick<Client, 'execute'>, workId: string, status: string) 
     sql: 'INSERT OR REPLACE INTO index_log (work_id, status, indexed_at) VALUES (?, ?, ?)',
     args: [workId, status, Date.now()],
   });
-}
-
-async function pMap<T, R>(
-  items: T[],
-  fn: (item: T, index: number) => Promise<R>,
-  concurrency: number
-): Promise<R[]> {
-  const results: R[] = [];
-  let idx = 0;
-  async function worker() {
-    while (idx < items.length) {
-      const i = idx++;
-      results[i] = await fn(items[i], i);
-    }
-  }
-  await Promise.all(Array.from({ length: concurrency }, worker));
-  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -164,15 +137,6 @@ async function setupDb(): Promise<Client> {
 // CSV catalog
 // ---------------------------------------------------------------------------
 
-interface CatalogRow {
-  work_id: string;
-  title: string;
-  author: string;
-  card_url: string;
-  file_url: string;
-  encoding: string;
-}
-
 async function downloadCatalog(): Promise<Buffer> {
   if (!fs.existsSync(CATALOG_PATH)) {
     console.log('Downloading catalog...');
@@ -182,53 +146,6 @@ async function downloadCatalog(): Promise<Buffer> {
   const entry = zip.getEntries().find((e) => e.entryName.endsWith('.csv'));
   if (!entry) throw new Error('CSV not found in catalog zip');
   return entry.getData();
-}
-
-function parseCatalog(csvBuffer: Buffer): CatalogRow[] {
-  const records = parse(csvBuffer.toString('utf8'), {
-    columns: true,
-    skip_empty_lines: true,
-    relax_quotes: true,
-    bom: true,
-  }) as Record<string, string>[];
-
-  return records
-    .filter(
-      (r) =>
-        r['作品著作権フラグ'] === 'なし' &&
-        r['人物著作権フラグ'] === 'なし' &&
-        r['テキストファイルURL']?.trim()
-    )
-    .map((r) => ({
-      work_id: r['作品ID'],
-      title: r['作品名'],
-      author: `${r['姓']}　${r['名']}`.trim(),
-      card_url: r['図書カードURL'],
-      file_url: r['テキストファイルURL'],
-      encoding: r['テキストファイル符号化方式'] ?? 'ShiftJIS',
-    }));
-}
-
-// ---------------------------------------------------------------------------
-// Per-work processing
-// ---------------------------------------------------------------------------
-
-/**
- * Convert an aozora.gr.jp zip URL to a raw GitHub URL for aozorabunko_text.
- * e.g. https://www.aozora.gr.jp/cards/000081/files/45630_ruby_23610.zip
- *   -> https://raw.githubusercontent.com/aozorahack/aozorabunko_text/master/cards/000081/files/45630_ruby_23610/45630_ruby_23610.txt
- * Returns null if the URL doesn't match the expected zip pattern.
- */
-function textUrlFromFileUrl(fileUrl: string): string | null {
-  const match = fileUrl.match(/\/(cards\/\d+\/files\/([^/]+))\.zip$/);
-  if (!match) return null;
-  const [, dirPath, basename] = match;
-  return `https://raw.githubusercontent.com/aozorahack/aozorabunko_text/master/${dirPath}/${basename}.txt`;
-}
-
-function decodeText(buf: Buffer, encoding: string): string {
-  const enc = encoding.toLowerCase().includes('utf') ? 'utf8' : 'Shift_JIS';
-  return iconv.decode(buf, enc);
 }
 
 // ---------------------------------------------------------------------------

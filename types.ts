@@ -1,6 +1,8 @@
 // The FTS index uses trigram tokenization, so queries under 3 characters can never match.
 export const MIN_QUERY_LENGTH = 3;
 export const PAGE_SIZE = 20;
+// Ceiling on the client-supplied `limit`, so one request can't scan the whole index.
+export const MAX_PAGE_SIZE = 50;
 
 export interface SearchResult {
   title: string;

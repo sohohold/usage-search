@@ -19,9 +19,10 @@ export default function Home() {
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
+    // The count is decorative: on any failure the header simply omits it.
     fetch('/api/stats')
-      .then((r) => r.json())
-      .then(setStats)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s: Stats | null) => s && setStats(s))
       .catch(() => {});
   }, []);
 
