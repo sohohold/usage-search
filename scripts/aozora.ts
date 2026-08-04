@@ -114,12 +114,33 @@ export const MIN_CHUNK_LENGTH = 15;
 /** A chunk is one result card, so it must stay short enough to display. */
 export const MAX_CHUNK_LENGTH = 400;
 
-/** Cut a run of text into pieces no longer than MAX_CHUNK_LENGTH. */
+const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff;
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
+
+/**
+ * Cut a run of text into pieces no longer than MAX_CHUNK_LENGTH.
+ *
+ * The cut never lands inside a surrogate pair: a supplementary character such
+ * as 𠮟 spans two UTF-16 units, and splitting it would leave a lone surrogate
+ * in each piece, which turns into a replacement character on the way into
+ * SQLite. Pulling the boundary back one unit keeps the pair whole and still
+ * respects the limit.
+ */
 function splitAtMaxLength(part: string): string[] {
   if (part.length <= MAX_CHUNK_LENGTH) return [part];
+
   const pieces: string[] = [];
-  for (let i = 0; i < part.length; i += MAX_CHUNK_LENGTH) {
-    pieces.push(part.slice(i, i + MAX_CHUNK_LENGTH));
+  for (let start = 0; start < part.length; ) {
+    let end = Math.min(start + MAX_CHUNK_LENGTH, part.length);
+    if (
+      end < part.length &&
+      isHighSurrogate(part.charCodeAt(end - 1)) &&
+      isLowSurrogate(part.charCodeAt(end))
+    ) {
+      end--;
+    }
+    pieces.push(part.slice(start, end));
+    start = end;
   }
   return pieces;
 }

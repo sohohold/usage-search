@@ -12,6 +12,8 @@ import {
 
 const RULE = '-'.repeat(55);
 const LEGEND = '【テキスト中に現れる記号について】';
+/** A high surrogate with no low after it, or a low surrogate with no high before it. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
 /** Wrap body text in the standard Aozora layout: title, legend block, body, colophon. */
 function aozoraDoc(body: string, { legend = true } = {}) {
@@ -206,6 +208,21 @@ describe('splitIntoChunks', () => {
       expect(c.length).toBeLessThanOrEqual(MAX_CHUNK_LENGTH);
     }
     expect(chunks.join('')).toBe('あ'.repeat(1000));
+  });
+
+  it('CH-11: 上限の切れ目がサロゲートペアに重なっても分断しない', () => {
+    // 「𠮟」は補助面の文字なので UTF-16 では2コードユニット。399文字の後に置くと、
+    // 上限400の切れ目がちょうどペアの内側に落ちる。
+    const para = 'あ'.repeat(MAX_CHUNK_LENGTH - 1) + '𠮟' + 'い'.repeat(100);
+    const chunks = splitIntoChunks(para);
+
+    for (const c of chunks) {
+      expect(c.length).toBeLessThanOrEqual(MAX_CHUNK_LENGTH);
+      // 孤立したサロゲートは SQLite へ書き出す時点で置換文字に化ける。
+      expect(c).not.toMatch(LONE_SURROGATE);
+    }
+    expect(chunks.join('')).toBe(para);
+    expect(chunks.filter((c) => c.includes('𠮟'))).toHaveLength(1);
   });
 
   it('CH-09: 空文字・空白のみは空配列を返す', () => {
