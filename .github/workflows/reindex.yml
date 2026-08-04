@@ -15,9 +15,13 @@ on:
   workflow_dispatch:
     inputs:
       db_name:
-        description: 'Turso database name (blank = aozora-YYYYMMDD)'
+        description: 'Turso database name (blank = aozora-YYYYMMDD-HHMM)'
         required: false
         default: ''
+      replace:
+        description: 'DESTROY an existing database of the same name first (its tokens stop working)'
+        type: boolean
+        default: false
       limit:
         description: 'Index only the first N works (blank = every public-domain work, 20-60 min)'
         required: false
@@ -68,7 +72,9 @@ jobs:
         run: |
           NAME="$DB_NAME_INPUT"
           if [ -z "$NAME" ]; then
-            NAME="aozora-$(date -u +%Y%m%d)"
+            # Minutes are part of the default because Turso cannot overwrite a
+            # database: a date-only name collides with any earlier run that day.
+            NAME="aozora-$(date -u +%Y%m%d-%H%M)"
           fi
           if ! printf '%s' "$NAME" | grep -Eq '^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$'; then
             echo "::error::Invalid Turso database name: $NAME"
@@ -174,14 +180,23 @@ jobs:
         env:
           TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}
           DB_NAME: ${{ steps.target.outputs.name }}
+          REPLACE: ${{ inputs.replace }}
         run: |
           if [ -z "$TURSO_API_TOKEN" ]; then
             echo "::error::The TURSO_API_TOKEN secret is not set."
             exit 1
           fi
+
           if turso db list | awk 'NR > 1 {print $1}' | grep -qx "$DB_NAME"; then
-            echo "::error::Database $DB_NAME already exists. Turso cannot overwrite it; choose another name."
-            exit 1
+            if [ "$REPLACE" != "true" ]; then
+              echo "::error::Database $DB_NAME already exists. Turso has no overwrite; re-run with a different db_name, or set replace to destroy this one first."
+              exit 1
+            fi
+            # Turso offers no replace operation, so reusing a name means losing
+            # the old database outright. Any token issued for it stops working,
+            # which breaks anything still pointing at it.
+            echo "::warning::Destroying the existing database $DB_NAME; its auth tokens will stop working."
+            turso db destroy "$DB_NAME" --yes
           fi
 
           # `turso db import` names the database after the file it is given,
@@ -247,7 +262,7 @@ jobs:
             echo "   - \`TURSO_DATABASE_URL\` = \`${URL:-turso db show $DB_NAME --url で取得}\`"
             echo "   - \`TURSO_AUTH_TOKEN\` = 1. で発行したトークン"
             echo "3. 再デプロイする"
-            echo "4. 表示を確認したら、旧データベースを \`turso db destroy <旧名>\` で削除する"
+            echo "4. 表示を確認したら、旧データベースを \`turso db destroy <旧名> --yes\` で削除する"
             echo
             echo "> 認証トークンはこのワークフローでは発行も出力もしていません。"
             echo "> このリポジトリは public で、ジョブログ・サマリ・artifact は誰でも閲覧できるためです。"
