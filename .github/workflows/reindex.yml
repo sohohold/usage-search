@@ -1,0 +1,248 @@
+name: Reindex
+
+# Rebuilds the search index from Aozora Bunko and uploads it to Turso as a NEW
+# database. Nothing in production moves: the running app keeps pointing at the
+# old database until its Vercel environment variables are changed by hand, so a
+# bad run is never live and the previous database stays available for rollback.
+#
+# Required secret: TURSO_API_TOKEN (a Turso platform token, not a database token).
+#
+# This repository is public, so database auth tokens are deliberately never
+# created or printed here — job logs, step summaries and artifacts are all
+# world-readable. Issue the token from the Turso dashboard instead.
+
+on:
+  workflow_dispatch:
+    inputs:
+      db_name:
+        description: 'Turso database name (blank = aozora-YYYYMMDD)'
+        required: false
+        default: ''
+      limit:
+        description: 'Index only the first N works (blank = every public-domain work, 20-60 min)'
+        required: false
+        default: ''
+      resume:
+        description: 'Continue from the partial index cached by a previous run'
+        type: boolean
+        default: false
+      skip_upload:
+        description: 'Build and verify only, without creating the Turso database'
+        type: boolean
+        default: false
+
+# One rebuild at a time: concurrent runs would fight over the shared cache.
+concurrency:
+  group: reindex
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  # The build always writes to a fixed path so a cached partial index can be
+  # resumed no matter what the target database ends up being called.
+  BUILD_PATH: data/index.db
+
+jobs:
+  reindex:
+    runs-on: ubuntu-latest
+    # A full run takes 20-60 minutes; the cap leaves room for slow downloads.
+    timeout-minutes: 350
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Resolve database name
+        id: target
+        env:
+          DB_NAME_INPUT: ${{ inputs.db_name }}
+          LIMIT_INPUT: ${{ inputs.limit }}
+        run: |
+          NAME="$DB_NAME_INPUT"
+          if [ -z "$NAME" ]; then
+            NAME="aozora-$(date -u +%Y%m%d)"
+          fi
+          if ! printf '%s' "$NAME" | grep -Eq '^[a-z0-9][a-z0-9-]{0,30}[a-z0-9]$'; then
+            echo "::error::Invalid Turso database name: $NAME"
+            exit 1
+          fi
+          if [ -n "$LIMIT_INPUT" ] && ! printf '%s' "$LIMIT_INPUT" | grep -Eq '^[0-9]+$'; then
+            echo "::error::limit must be a positive integer, got: $LIMIT_INPUT"
+            exit 1
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+      # Keyed on a hash of the indexing code: when the cleaning rules change, a
+      # partial index built under the old rules must not be resumed into, or the
+      # result would mix output from two different versions. The key below never
+      # matches exactly, so the restore always falls through to the prefix and
+      # picks up the most recent partial index built from the same code.
+      - name: Restore partial index
+        if: inputs.resume
+        uses: actions/cache/restore@v4
+        with:
+          path: data/index.db
+          key: reindex-${{ hashFiles('scripts/*.ts') }}-
+          restore-keys: reindex-${{ hashFiles('scripts/*.ts') }}-
+
+      - name: Build index
+        env:
+          DATA_DIR: ./data
+          DB_PATH: ./data/index.db
+          LIMIT_INPUT: ${{ inputs.limit }}
+          RESUME_INPUT: ${{ inputs.resume }}
+        run: |
+          ARGS=()
+          if [ -n "$LIMIT_INPUT" ]; then
+            ARGS+=(--limit "$LIMIT_INPUT")
+          fi
+          if [ "$RESUME_INPUT" = "true" ]; then
+            ARGS+=(--resume)
+          fi
+          npx tsx scripts/build-index.ts "${ARGS[@]}"
+
+      # Runs even when the build fails, so a long partial run is not thrown away.
+      # The checkpoint folds the WAL back in so the cached file stands alone.
+      - name: Checkpoint the index
+        if: always()
+        continue-on-error: true
+        run: |
+          if [ -f "$BUILD_PATH" ]; then
+            sqlite3 "$BUILD_PATH" 'PRAGMA wal_checkpoint(TRUNCATE);' > /dev/null
+          fi
+
+      - name: Save partial index
+        if: always()
+        continue-on-error: true
+        uses: actions/cache/save@v4
+        with:
+          path: data/index.db
+          key: reindex-${{ hashFiles('scripts/*.ts') }}-${{ github.run_id }}
+
+      # Refuse to upload an index that is empty or still carries Aozora markup:
+      # both mean the run produced something not worth pointing production at.
+      - name: Verify the index
+        id: verify
+        run: |
+          WORKS=$(sqlite3 "$BUILD_PATH" 'SELECT count(*) FROM works;')
+          CHUNKS=$(sqlite3 "$BUILD_PATH" 'SELECT count(*) FROM chunks;')
+          FAILED=$(sqlite3 "$BUILD_PATH" "SELECT count(*) FROM index_log WHERE status != 'ok';")
+          RESIDUE=$(sqlite3 "$BUILD_PATH" \
+            "SELECT count(*) FROM chunks WHERE text LIKE '%［＃%' OR text LIKE '%《%' OR text LIKE '%テキスト中に現れる記号について%';")
+          SIZE=$(du -h "$BUILD_PATH" | cut -f1)
+
+          {
+            echo "works=$WORKS"
+            echo "chunks=$CHUNKS"
+            echo "failed=$FAILED"
+            echo "size=$SIZE"
+          } >> "$GITHUB_OUTPUT"
+          echo "works=$WORKS chunks=$CHUNKS failed_works=$FAILED markup_residue=$RESIDUE size=$SIZE"
+
+          if [ "$WORKS" -eq 0 ] || [ "$CHUNKS" -eq 0 ]; then
+            echo "::error::The index is empty ($WORKS works, $CHUNKS chunks)."
+            exit 1
+          fi
+          if [ "$RESIDUE" -ne 0 ]; then
+            echo "::error::$RESIDUE chunks still contain Aozora markup or the notation legend."
+            exit 1
+          fi
+
+      - name: Install Turso CLI
+        if: ${{ !inputs.skip_upload }}
+        run: |
+          curl -sSfL https://get.tur.so/install.sh | bash
+          echo "$HOME/.turso" >> "$GITHUB_PATH"
+
+      - name: Upload to Turso
+        id: upload
+        if: ${{ !inputs.skip_upload }}
+        env:
+          TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}
+          DB_NAME: ${{ steps.target.outputs.name }}
+        run: |
+          if [ -z "$TURSO_API_TOKEN" ]; then
+            echo "::error::The TURSO_API_TOKEN secret is not set."
+            exit 1
+          fi
+          if turso db list | awk 'NR > 1 {print $1}' | grep -qx "$DB_NAME"; then
+            echo "::error::Database $DB_NAME already exists. Turso cannot overwrite it; choose another name."
+            exit 1
+          fi
+
+          # `turso db import` names the database after the file it is given,
+          # which is why the build path is copied to the target name first.
+          cp "$BUILD_PATH" "data/$DB_NAME.db"
+          turso db import "data/$DB_NAME.db"
+
+      # Confirms the rows actually landed remotely, rather than trusting that the
+      # upload call returned successfully.
+      - name: Verify the uploaded database
+        if: ${{ !inputs.skip_upload }}
+        env:
+          TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}
+          DB_NAME: ${{ steps.target.outputs.name }}
+          EXPECTED_WORKS: ${{ steps.verify.outputs.works }}
+        run: |
+          OUTPUT=$(turso db shell "$DB_NAME" 'SELECT count(*) AS works FROM works;')
+          echo "$OUTPUT"
+          if ! printf '%s' "$OUTPUT" | grep -qw "$EXPECTED_WORKS"; then
+            echo "::error::Remote database reports a different work count than the local index ($EXPECTED_WORKS)."
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        env:
+          TURSO_API_TOKEN: ${{ secrets.TURSO_API_TOKEN }}
+          DB_NAME: ${{ steps.target.outputs.name }}
+          WORKS: ${{ steps.verify.outputs.works }}
+          CHUNKS: ${{ steps.verify.outputs.chunks }}
+          FAILED: ${{ steps.verify.outputs.failed }}
+          SIZE: ${{ steps.verify.outputs.size }}
+          UPLOADED: ${{ steps.upload.outcome }}
+        run: |
+          {
+            echo "## 再インデックス結果"
+            echo
+            echo "| 項目 | 値 |"
+            echo "|---|---|"
+            echo "| データベース名 | \`$DB_NAME\` |"
+            echo "| 作品数 | ${WORKS:-—} |"
+            echo "| 段落数 | ${CHUNKS:-—} |"
+            echo "| 取得に失敗した作品 | ${FAILED:-—} |"
+            echo "| ファイルサイズ | ${SIZE:-—} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$UPLOADED" != "success" ]; then
+            {
+              echo
+              echo "Turso への取り込みは行われていません（スキップまたは失敗）。"
+              echo "途中まで構築できていれば次回 \`resume\` を有効にして続きから再開できます。"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          URL=$(turso db show "$DB_NAME" --url 2>/dev/null || true)
+          {
+            echo
+            echo "### 切り替え手順"
+            echo
+            echo "1. Turso ダッシュボードで \`$DB_NAME\` の認証トークンを発行する"
+            echo "2. Vercel の環境変数を更新する"
+            echo "   - \`TURSO_DATABASE_URL\` = \`${URL:-turso db show $DB_NAME --url で取得}\`"
+            echo "   - \`TURSO_AUTH_TOKEN\` = 1. で発行したトークン"
+            echo "3. 再デプロイする"
+            echo "4. 表示を確認したら、旧データベースを \`turso db destroy <旧名>\` で削除する"
+            echo
+            echo "> 認証トークンはこのワークフローでは発行も出力もしていません。"
+            echo "> このリポジトリは public で、ジョブログ・サマリ・artifact は誰でも閲覧できるためです。"
+          } >> "$GITHUB_STEP_SUMMARY"
