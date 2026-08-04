@@ -183,9 +183,13 @@ describe('splitIntoChunks', () => {
     }
   });
 
-  it('CH-06: 分割で文字が欠落も重複もしない', () => {
+  it('CH-06: 末尾断片が捨てられないかぎり、分割で文字が欠落も重複もしない', () => {
     const para = 'これは文です。'.repeat(200);
-    expect(splitIntoChunks(para).join('')).toBe(para);
+    const chunks = splitIntoChunks(para);
+
+    // 末尾断片が15文字以上なので CH-07 の切り捨ては起きない。
+    expect(chunks.at(-1)!.length).toBeGreaterThanOrEqual(MIN_CHUNK_LENGTH);
+    expect(chunks.join('')).toBe(para);
   });
 
   it('CH-07: 分割後の末尾断片が15文字未満なら捨てる', () => {
