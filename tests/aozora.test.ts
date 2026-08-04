@@ -225,6 +225,17 @@ describe('splitIntoChunks', () => {
     expect(chunks.filter((c) => c.includes('𠮟'))).toHaveLength(1);
   });
 
+  it('CH-12: 15文字未満の文で始まる上限超の段落でも各チャンクが上限以下になる', () => {
+    // 短すぎて単独では切り出せない文の後ろに、分割できない長さが続くケース。
+    const para = '短い。' + 'あ'.repeat(500);
+    const chunks = splitIntoChunks(para);
+
+    for (const c of chunks) {
+      expect(c.length).toBeLessThanOrEqual(MAX_CHUNK_LENGTH);
+    }
+    expect(chunks.join('')).toBe(para);
+  });
+
   it('CH-09: 空文字・空白のみは空配列を返す', () => {
     expect(splitIntoChunks('')).toEqual([]);
     expect(splitIntoChunks('   \n\n  \n')).toEqual([]);

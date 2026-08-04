@@ -80,18 +80,24 @@ jobs:
           fi
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
 
-      # Keyed on a hash of the indexing code: when the cleaning rules change, a
-      # partial index built under the old rules must not be resumed into, or the
-      # result would mix output from two different versions. The key below never
-      # matches exactly, so the restore always falls through to the prefix and
-      # picks up the most recent partial index built from the same code.
+      # The cache namespace covers both the indexing code and the requested
+      # limit. Hashing the code keeps a partial index built under older cleaning
+      # rules from being resumed into and mixing two versions of the output.
+      # Including the limit keeps a full build from being restored under a
+      # limited dispatch: the indexer would skip the works already logged but
+      # leave every other cached row in place, so a run asking for 50 works
+      # would verify and upload a complete database.
+      #
+      # The key below never matches exactly, so the restore always falls through
+      # to the prefix and picks up the most recent partial index in that
+      # namespace.
       - name: Restore partial index
         if: inputs.resume
         uses: actions/cache/restore@v4
         with:
           path: data/index.db
-          key: reindex-${{ hashFiles('scripts/*.ts') }}-
-          restore-keys: reindex-${{ hashFiles('scripts/*.ts') }}-
+          key: reindex-${{ hashFiles('scripts/*.ts') }}-${{ inputs.limit || 'full' }}-
+          restore-keys: reindex-${{ hashFiles('scripts/*.ts') }}-${{ inputs.limit || 'full' }}-
 
       - name: Build index
         env:
@@ -125,7 +131,7 @@ jobs:
         uses: actions/cache/save@v4
         with:
           path: data/index.db
-          key: reindex-${{ hashFiles('scripts/*.ts') }}-${{ github.run_id }}
+          key: reindex-${{ hashFiles('scripts/*.ts') }}-${{ inputs.limit || 'full' }}-${{ github.run_id }}
 
       # Refuse to upload an index that is empty or still carries Aozora markup:
       # both mean the run produced something not worth pointing production at.

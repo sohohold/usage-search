@@ -167,11 +167,18 @@ export function splitIntoChunks(text: string): string[] {
     // oversized pieces are cut at the limit before accumulating.
     let current = '';
     for (const part of trimmed.split(/(?<=[。！？」』])/).flatMap(splitAtMaxLength)) {
-      if (current.length + part.length > MAX_CHUNK_LENGTH && current.length >= MIN_CHUNK_LENGTH) {
+      if (current.length + part.length <= MAX_CHUNK_LENGTH) {
+        current += part;
+      } else if (current.length >= MIN_CHUNK_LENGTH) {
         chunks.push(current.trim());
         current = part;
       } else {
-        current += part;
+        // What is held so far is too short to stand alone, so it stays attached
+        // to the part that follows and the join is cut back to the limit. Simply
+        // concatenating here would push the chunk past MAX_CHUNK_LENGTH.
+        const pieces = splitAtMaxLength(current + part);
+        chunks.push(...pieces.slice(0, -1).map((piece) => piece.trim()));
+        current = pieces[pieces.length - 1];
       }
     }
     if (current.trim().length >= MIN_CHUNK_LENGTH) {
