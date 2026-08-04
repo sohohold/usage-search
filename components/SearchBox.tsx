@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useRef, type KeyboardEvent } from 'react';
-import { MIN_QUERY_LENGTH } from '@/types';
 
 interface Props {
   value: string;
@@ -43,7 +42,9 @@ export default function SearchBox({ value, onChange, onSubmit, isLoading }: Prop
       </div>
       <button
         onClick={onSubmit}
-        disabled={isLoading || value.trim().length < MIN_QUERY_LENGTH}
+        // Short queries stay submittable: only the automatic search is withheld,
+        // so the server can explain why a 1-2 character word cannot match.
+        disabled={isLoading || value.trim().length === 0}
         className="rounded-xl bg-amber-500 px-6 py-3.5 font-medium text-white shadow-sm
                    transition hover:bg-amber-600 active:scale-95
                    disabled:cursor-not-allowed disabled:opacity-40"

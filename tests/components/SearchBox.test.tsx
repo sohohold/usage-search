@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SearchBox from '@/components/SearchBox';
 
@@ -49,12 +49,14 @@ describe('SearchBox', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
   });
 
-  it('UI-06: 3文字未満ではボタンを押せない', () => {
-    expect(setup({ value: 'ab' }).button).toBeDisabled();
+  it('UI-06: 3文字未満でもボタンは押せる（自動検索だけを控える）', () => {
+    expect(setup({ value: 'ab' }).button).toBeEnabled();
   });
 
-  it('UI-07: 空白のみは trim 判定で押せない', () => {
+  it('UI-07: 空・空白のみは trim 判定で押せない', () => {
     expect(setup({ value: '     ' }).button).toBeDisabled();
+    cleanup();
+    expect(setup({ value: '' }).button).toBeDisabled();
   });
 
   it('UI-08: ローディング中はボタンを押せず、スピナーを出す', () => {

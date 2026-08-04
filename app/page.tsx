@@ -27,8 +27,6 @@ export default function Home() {
   }, []);
 
   const fetchResults = useCallback(async (q: string, offset = 0, append = false) => {
-    if (q.length < MIN_QUERY_LENGTH) return;
-
     // Cancel any in-flight request so a slow earlier query can't overwrite newer results.
     abortRef.current?.abort();
     const controller = new AbortController();
@@ -83,9 +81,12 @@ export default function Home() {
     };
   }, [query, fetchResults]);
 
+  // Explicit submission bypasses the length floor: a query too short to match is
+  // worth sending so the server's explanation reaches the user.
   const handleSubmit = () => {
     if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    fetchResults(query.trim());
+    const q = query.trim();
+    if (q) fetchResults(q);
   };
 
   const handleLoadMore = () => {

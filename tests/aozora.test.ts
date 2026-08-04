@@ -5,6 +5,7 @@ import iconv from 'iconv-lite';
 import {
   cleanAozoraText,
   splitIntoChunks,
+  LINE_JOINER,
   MIN_CHUNK_LENGTH,
   MAX_CHUNK_LENGTH,
 } from '@/scripts/aozora';
@@ -54,7 +55,9 @@ describe('cleanAozoraText', () => {
   });
 
   it('AZ-07: 底本を含まないテキストの末尾は削らない', () => {
-    expect(cleanAozoraText('本文です。\n続きもあります。')).toBe('本文です。\n続きもあります。');
+    expect(cleanAozoraText('本文です。\n続きもあります。')).toBe(
+      `本文です。${LINE_JOINER}続きもあります。`
+    );
   });
 
   it('AZ-08: 縦棒つきルビを本体だけにする', () => {
@@ -75,8 +78,9 @@ describe('cleanAozoraText', () => {
   });
 
   it('AZ-12: 《 と 》 が別の行にある場合はルビとみなさない', () => {
-    const input = '前の行《\n次の行》のつづき';
-    expect(cleanAozoraText(input)).toBe(input);
+    expect(cleanAozoraText('前の行《\n次の行》のつづき')).toBe(
+      `前の行《${LINE_JOINER}次の行》のつづき`
+    );
   });
 
   it('AZ-13: 全角の入力者注 ［＃…］ を削除する', () => {
@@ -103,12 +107,18 @@ describe('cleanAozoraText', () => {
     expect(out).toContain('私はその人を常に先生と呼んでいた。');
   });
 
-  it('AZ-17: CRLF と CR を LF に正規化する', () => {
-    expect(cleanAozoraText('一行目\r\n二行目\r三行目')).toBe('一行目\n二行目\n三行目');
+  it('AZ-17: 段落内の改行は区切り記号に置き換えて1行にする', () => {
+    // CRLF / CR も同じ扱いになる。
+    expect(cleanAozoraText('一行目\r\n二行目\r三行目')).toBe(
+      `一行目${LINE_JOINER}二行目${LINE_JOINER}三行目`
+    );
+    expect(cleanAozoraText('行末に空白あり  \n　次の行')).toBe(`行末に空白あり${LINE_JOINER}次の行`);
   });
 
-  it('AZ-18: 3行以上の連続空行を2行に圧縮する', () => {
+  it('AZ-18: 空行は段落の区切りとして残し、連続分を1つにまとめる', () => {
     expect(cleanAozoraText('段落一。\n\n\n\n\n段落二。')).toBe('段落一。\n\n段落二。');
+    // 空白だけの行も空行として扱う。
+    expect(cleanAozoraText('段落一。\n　\n段落二。')).toBe('段落一。\n\n段落二。');
   });
 
   it('AZ-19: 前後の空白・空行を除去する', () => {
@@ -132,6 +142,10 @@ describe('cleanAozoraText', () => {
     // The body starts at the first heading, which survives with its markup stripped.
     expect(out.startsWith('上　先生と私')).toBe(true);
     expect(out).toContain('私はその人を常に先生と呼んでいた。');
+    // 各段落は1行にまとまり、段落の区切りだけが空行として残る。
+    for (const paragraph of out.split('\n\n')) {
+      expect(paragraph).not.toContain('\n');
+    }
   });
 });
 

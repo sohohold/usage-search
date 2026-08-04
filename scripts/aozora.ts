@@ -72,13 +72,30 @@ function stripMarkup(text: string): string {
   return text;
 }
 
-/** Normalize whitespace */
+/** Joins the lines inside one paragraph so a chunk always renders as a single line. */
+export const LINE_JOINER = ' / ';
+/** Blank lines survive as paragraph breaks, since a paragraph is one indexed chunk. */
+const PARAGRAPH_SEPARATOR = '\n\n';
+/** One or more blank lines, allowing lines that hold only spaces. */
+const BLANK_LINE_RUN = /\n(?:[ \t　]*\n)+/;
+
+/**
+ * Reduce the text to paragraphs separated by a blank line, each paragraph on a
+ * single line with its internal breaks shown as `LINE_JOINER`.
+ */
 function normalizeWhitespace(text: string): string {
-  // Normalize line endings
-  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  // Collapse 3+ blank lines to 2
-  text = text.replace(/\n{3,}/g, '\n\n');
-  return text.trim();
+  return text
+    .replace(/\r\n?/g, '\n')
+    .split(BLANK_LINE_RUN)
+    .map((paragraph) =>
+      paragraph
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .join(LINE_JOINER)
+    )
+    .filter(Boolean)
+    .join(PARAGRAPH_SEPARATOR);
 }
 
 /** Full pipeline: raw Aozora text → cleaned body text */

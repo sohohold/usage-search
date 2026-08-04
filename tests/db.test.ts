@@ -110,7 +110,7 @@ describe('search', () => {
 });
 
 describe('getStats', () => {
-  it('DB-16: 作品数とチャンク数を返す', async () => {
+  it('DB-15: 作品数とチャンク数を返す', async () => {
     expect(await getStats()).toEqual({ works: TOTAL_WORKS, chunks: TOTAL_CHUNKS });
   });
 });

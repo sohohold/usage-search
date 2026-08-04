@@ -134,7 +134,7 @@ describe('統計情報', () => {
 });
 
 describe('検索の発火', () => {
-  it('PG-03: 3文字未満では検索しない', async () => {
+  it('PG-03: 3文字未満では自動検索しない', async () => {
     render(<Home />);
     statsResponds(true);
     await settle();
@@ -144,7 +144,49 @@ describe('検索の発火', () => {
     expect(searchCalls).toHaveLength(0);
   });
 
-  it('PG-04: 3文字以上なら400ms後に1回だけ検索する', async () => {
+  it('PG-04: 3文字未満でも明示送信なら検索し、サーバーのメッセージを表示する', async () => {
+    render(<Home />);
+    statsResponds(true);
+    await settle();
+
+    type('月が');
+    await advance(DEBOUNCE_MS * 2);
+    expect(searchCalls).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: '検索' }));
+    expect(searchCalls).toHaveLength(1);
+    expect(searchCalls[0].url).toContain(`q=${encodeURIComponent('月が')}`);
+
+    searchCalls[0].resolve({ error: '3文字以上入力してください' }, { ok: false, status: 400 });
+    await settle();
+    expect(screen.getByText('3文字以上入力してください')).toBeInTheDocument();
+  });
+
+  it('PG-05: Enter でも3文字未満のクエリを送信する', async () => {
+    render(<Home />);
+    statsResponds(true);
+    await settle();
+
+    type('月が');
+    fireEvent.keyDown(input(), { key: 'Enter' });
+
+    expect(searchCalls).toHaveLength(1);
+    expect(searchCalls[0].url).toContain(`q=${encodeURIComponent('月が')}`);
+  });
+
+  it('PG-06: 空・空白のみのクエリは送信しない', async () => {
+    render(<Home />);
+    statsResponds(true);
+    await settle();
+
+    type('   ');
+    fireEvent.keyDown(input(), { key: 'Enter' });
+    await advance(DEBOUNCE_MS * 2);
+
+    expect(searchCalls).toHaveLength(0);
+  });
+
+  it('PG-07: 3文字以上なら400ms後に1回だけ検索する', async () => {
     render(<Home />);
     statsResponds(true);
     await settle();
@@ -158,7 +200,7 @@ describe('検索の発火', () => {
     expect(searchCalls[0].url).toContain(`q=${encodeURIComponent('月が綺麗')}`);
   });
 
-  it('PG-05: 連続入力では最後のクエリで1回だけ検索する', async () => {
+  it('PG-08: 連続入力では最後のクエリで1回だけ検索する', async () => {
     render(<Home />);
     statsResponds(true);
     await settle();
@@ -174,7 +216,7 @@ describe('検索の発火', () => {
     expect(searchCalls[0].url).toContain(`q=${encodeURIComponent('月が綺麗')}`);
   });
 
-  it('PG-06: 検索ボタンはデバウンスを待たずに検索し、二重に呼ばない', async () => {
+  it('PG-09: 検索ボタンはデバウンスを待たずに検索し、二重に呼ばない', async () => {
     render(<Home />);
     statsResponds(true);
     await settle();
@@ -189,7 +231,7 @@ describe('検索の発火', () => {
 });
 
 describe('リクエストの競合', () => {
-  it('PG-07: 検索中に新しいクエリが来たら先行リクエストを中断する', async () => {
+  it('PG-10: 検索中に新しいクエリが来たら先行リクエストを中断する', async () => {
     render(<Home />);
     statsResponds(true);
     await settle();
@@ -206,7 +248,7 @@ describe('リクエストの競合', () => {
     expect(searchCalls).toHaveLength(2);
   });
 
-  it('PG-08: 中断された先行レスポンスで新しい結果が上書きされない', async () => {
+  it('PG-11: 中断された先行レスポンスで新しい結果が上書きされない', async () => {
     render(<Home />);
     statsResponds(true);
     await settle();
@@ -229,7 +271,7 @@ describe('リクエストの競合', () => {
     expect(document.body.textContent).toContain('「月が綺麗な夜」');
   });
 
-  it('PG-09: 中断をエラーとして表示しない', async () => {
+  it('PG-12: 中断をエラーとして表示しない', async () => {
     render(<Home />);
     statsResponds(true);
     await settle();
@@ -242,7 +284,7 @@ describe('リクエストの競合', () => {
     expect(screen.queryByText('サーバーに接続できませんでした')).not.toBeInTheDocument();
   });
 
-  it('PG-10: 3文字未満に戻すと結果を消し、進行中のリクエストを中断する', async () => {
+  it('PG-13: 3文字未満に戻すと結果を消し、進行中のリクエストを中断する', async () => {
     await renderWithResults('月が綺麗', 3);
     expect(screen.getAllByRole('article')).toHaveLength(3);
 
@@ -255,7 +297,7 @@ describe('リクエストの競合', () => {
 });
 
 describe('エラー表示', () => {
-  it('PG-11: 400 応答はサーバーのメッセージを表示する', async () => {
+  it('PG-14: 400 応答はサーバーのメッセージを表示する', async () => {
     render(<Home />);
     statsResponds(true);
     await settle();
@@ -268,7 +310,7 @@ describe('エラー表示', () => {
     expect(screen.getByText('3文字以上入力してください')).toBeInTheDocument();
   });
 
-  it('PG-12: 通信エラーは接続失敗のメッセージを表示する', async () => {
+  it('PG-15: 通信エラーは接続失敗のメッセージを表示する', async () => {
     render(<Home />);
     statsResponds(true);
     await settle();
@@ -281,7 +323,7 @@ describe('エラー表示', () => {
     expect(screen.getByText('サーバーに接続できませんでした')).toBeInTheDocument();
   });
 
-  it('PG-13: 再検索が成功するとエラー表示が消える', async () => {
+  it('PG-16: 再検索が成功するとエラー表示が消える', async () => {
     render(<Home />);
     statsResponds(true);
     await settle();
@@ -302,7 +344,7 @@ describe('エラー表示', () => {
 });
 
 describe('もっと見る', () => {
-  it('PG-14: 既存件数を offset にして追加取得し、結果に追記する', async () => {
+  it('PG-17: 既存件数を offset にして追加取得し、結果に追記する', async () => {
     await renderWithResults('月が綺麗', 20, true);
 
     fireEvent.click(loadMore()!);
@@ -315,7 +357,7 @@ describe('もっと見る', () => {
     expect(screen.getAllByRole('article')).toHaveLength(25);
   });
 
-  it('PG-15: 入力欄の現在値ではなく表示中の結果のクエリで追加取得する', async () => {
+  it('PG-18: 入力欄の現在値ではなく表示中の結果のクエリで追加取得する', async () => {
     await renderWithResults('月が綺麗', 20, true);
 
     // デバウンスを進めないので、入力だけ変わって検索は走っていない状態。
@@ -327,7 +369,7 @@ describe('もっと見る', () => {
     expect(searchCalls[1].url).not.toContain(encodeURIComponent('月が綺麗な夜'));
   });
 
-  it('PG-16: 新しい検索の実行中は追加取得しない', async () => {
+  it('PG-19: 新しい検索の実行中は追加取得しない', async () => {
     await renderWithResults('月が綺麗', 20, true);
 
     type('月が綺麗な夜');
@@ -339,7 +381,7 @@ describe('もっと見る', () => {
     expect(searchCalls).toHaveLength(2);
   });
 
-  it('PG-17: 結果が無いうちは「もっと見る」を出さない', async () => {
+  it('PG-20: 結果が無いうちは「もっと見る」を出さない', async () => {
     render(<Home />);
     statsResponds(true);
     await settle();
@@ -351,7 +393,7 @@ describe('もっと見る', () => {
 describe('表示状態', () => {
   const spinner = () => document.body.querySelector('.animate-spin');
 
-  it('PG-18: 検索中はスピナーを出し、既存結果を半透明にする', async () => {
+  it('PG-21: 検索中はスピナーを出し、既存結果を半透明にする', async () => {
     await renderWithResults('月が綺麗', 3);
 
     type('月が綺麗な夜');
@@ -367,7 +409,7 @@ describe('表示状態', () => {
     expect(document.body.querySelector('.opacity-50')).toBeNull();
   });
 
-  it('PG-18: 中断された先行リクエストの後始末でスピナーを消さない', async () => {
+  it('PG-22: 中断された先行リクエストの後始末でスピナーを消さない', async () => {
     await renderWithResults('月が綺麗', 3);
 
     // 先行リクエストを未解決のまま新しい検索で追い越す。
@@ -388,7 +430,7 @@ describe('表示状態', () => {
     expect(spinner()).toBeNull();
   });
 
-  it('PG-19: 未検索ならプレースホルダを表示する', async () => {
+  it('PG-23: 未検索ならプレースホルダを表示する', async () => {
     render(<Home />);
     statsResponds(true);
     await settle();
@@ -397,7 +439,7 @@ describe('表示状態', () => {
     expect(screen.queryAllByRole('article')).toHaveLength(0);
   });
 
-  it('PG-20: デバウンス待ちのままアンマウントしてもタイマーが残らない', async () => {
+  it('PG-24: デバウンス待ちのままアンマウントしてもタイマーが残らない', async () => {
     const { unmount } = render(<Home />);
     statsResponds(true);
     await settle();

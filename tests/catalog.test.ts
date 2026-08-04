@@ -179,6 +179,9 @@ describe('withRetry', () => {
   });
 
   it('IX-20: 再試行を使い切ったら最後のエラーを throw する', async () => {
+    // 既定の再試行は3回（1s / 2s / 4s 待ち）で、初回と合わせて計4回試行する。
+    expect(RETRY_DELAYS).toEqual([1000, 2000, 4000]);
+
     let calls = 0;
     await expect(
       withRetry(async () => {
@@ -186,9 +189,5 @@ describe('withRetry', () => {
       }, [0, 0, 0])
     ).rejects.toThrow('attempt 4');
     expect(calls).toBe(4);
-  });
-
-  it('IX-20: 既定の再試行間隔は3回分', () => {
-    expect(RETRY_DELAYS).toEqual([1000, 2000, 4000]);
   });
 });
