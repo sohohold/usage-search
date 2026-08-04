@@ -9,14 +9,33 @@
  * - Splitting into searchable paragraphs
  */
 
-/** Remove Aozora Bunko header (metadata before the horizontal rule) */
+const RULE_RE = /^-{4,}[ \t]*\r?\n/m;
+const LEGEND_HEADING = '【テキスト中に現れる記号について】';
+
+/**
+ * Remove the Aozora Bunko header (title, author, and the notation legend).
+ *
+ * The standard layout puts a legend block between two rules:
+ *
+ *     こころ / 夏目漱石
+ *     -------------------
+ *     【テキスト中に現れる記号について】  ← must not be indexed as body text
+ *     -------------------
+ *     （本文）
+ *
+ * so when a legend is present the header runs to the *second* rule. Works
+ * without a legend have a single rule, and some have none at all.
+ */
 function stripHeader(text: string): string {
-  // Header ends at the first line of dashes (--------)
-  const match = text.match(/^-{4,}\r?\n/m);
-  if (match?.index !== undefined) {
-    return text.slice(match.index + match[0].length);
+  const first = text.match(RULE_RE);
+  if (first?.index === undefined) return text;
+
+  const afterFirst = text.slice(first.index + first[0].length);
+  const second = afterFirst.match(RULE_RE);
+  if (second?.index !== undefined && afterFirst.slice(0, second.index).includes(LEGEND_HEADING)) {
+    return afterFirst.slice(second.index + second[0].length);
   }
-  return text;
+  return afterFirst;
 }
 
 /** Remove Aozora Bunko footer (bibliographic info after the body) */
@@ -39,22 +58,44 @@ function stripRuby(text: string): string {
   return text;
 }
 
-/** Remove Aozora markup tags like [#「○」入力者注 …] */
+/**
+ * Remove Aozora markup tags like ［＃「○」に傍点］ and gaiji markers like
+ * ※［＃「てへん＋劣」、第3水準1-84-77］.
+ *
+ * Real Aozora texts write these with full-width brackets; the half-width form
+ * is handled too so older or hand-edited sources stay covered. The optional
+ * leading ※ is part of the match so no stray marker is left behind.
+ */
 function stripMarkup(text: string): string {
-  // ※[#...] markers
-  text = text.replace(/※\[#[^\]]*\]/g, '');
-  // [#...] tags
-  text = text.replace(/\[#[^\]]*\]/g, '');
+  text = text.replace(/※?［＃[^］]*］/g, '');
+  text = text.replace(/※?\[#[^\]]*\]/g, '');
   return text;
 }
 
-/** Normalize whitespace */
+/** Joins the lines inside one paragraph so a chunk always renders as a single line. */
+export const LINE_JOINER = ' / ';
+/** Blank lines survive as paragraph breaks, since a paragraph is one indexed chunk. */
+const PARAGRAPH_SEPARATOR = '\n\n';
+/** One or more blank lines, allowing lines that hold only spaces. */
+const BLANK_LINE_RUN = /\n(?:[ \t　]*\n)+/;
+
+/**
+ * Reduce the text to paragraphs separated by a blank line, each paragraph on a
+ * single line with its internal breaks shown as `LINE_JOINER`.
+ */
 function normalizeWhitespace(text: string): string {
-  // Normalize line endings
-  text = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  // Collapse 3+ blank lines to 2
-  text = text.replace(/\n{3,}/g, '\n\n');
-  return text.trim();
+  return text
+    .replace(/\r\n?/g, '\n')
+    .split(BLANK_LINE_RUN)
+    .map((paragraph) =>
+      paragraph
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean)
+        .join(LINE_JOINER)
+    )
+    .filter(Boolean)
+    .join(PARAGRAPH_SEPARATOR);
 }
 
 /** Full pipeline: raw Aozora text → cleaned body text */
@@ -68,8 +109,41 @@ export function cleanAozoraText(raw: string): string {
   return text;
 }
 
-const MIN_CHUNK_LENGTH = 15;
-const MAX_CHUNK_LENGTH = 400;
+/** Paragraphs shorter than this carry no useful context, so they are not indexed. */
+export const MIN_CHUNK_LENGTH = 15;
+/** A chunk is one result card, so it must stay short enough to display. */
+export const MAX_CHUNK_LENGTH = 400;
+
+const isHighSurrogate = (code: number) => code >= 0xd800 && code <= 0xdbff;
+const isLowSurrogate = (code: number) => code >= 0xdc00 && code <= 0xdfff;
+
+/**
+ * Cut a run of text into pieces no longer than MAX_CHUNK_LENGTH.
+ *
+ * The cut never lands inside a surrogate pair: a supplementary character such
+ * as 𠮟 spans two UTF-16 units, and splitting it would leave a lone surrogate
+ * in each piece, which turns into a replacement character on the way into
+ * SQLite. Pulling the boundary back one unit keeps the pair whole and still
+ * respects the limit.
+ */
+function splitAtMaxLength(part: string): string[] {
+  if (part.length <= MAX_CHUNK_LENGTH) return [part];
+
+  const pieces: string[] = [];
+  for (let start = 0; start < part.length; ) {
+    let end = Math.min(start + MAX_CHUNK_LENGTH, part.length);
+    if (
+      end < part.length &&
+      isHighSurrogate(part.charCodeAt(end - 1)) &&
+      isLowSurrogate(part.charCodeAt(end))
+    ) {
+      end--;
+    }
+    pieces.push(part.slice(start, end));
+    start = end;
+  }
+  return pieces;
+}
 
 /**
  * Split cleaned text into paragraph chunks suitable for FTS indexing.
@@ -88,14 +162,23 @@ export function splitIntoChunks(text: string): string[] {
       continue;
     }
 
-    // Split long paragraphs at sentence boundaries
+    // Split long paragraphs at sentence boundaries. A single sentence can still
+    // exceed the limit (or the paragraph may have no sentence breaks at all), so
+    // oversized pieces are cut at the limit before accumulating.
     let current = '';
-    for (const part of trimmed.split(/(?<=[。！？」』])/)) {
-      if (current.length + part.length > MAX_CHUNK_LENGTH && current.length >= MIN_CHUNK_LENGTH) {
+    for (const part of trimmed.split(/(?<=[。！？」』])/).flatMap(splitAtMaxLength)) {
+      if (current.length + part.length <= MAX_CHUNK_LENGTH) {
+        current += part;
+      } else if (current.length >= MIN_CHUNK_LENGTH) {
         chunks.push(current.trim());
         current = part;
       } else {
-        current += part;
+        // What is held so far is too short to stand alone, so it stays attached
+        // to the part that follows and the join is cut back to the limit. Simply
+        // concatenating here would push the chunk past MAX_CHUNK_LENGTH.
+        const pieces = splitAtMaxLength(current + part);
+        chunks.push(...pieces.slice(0, -1).map((piece) => piece.trim()));
+        current = pieces[pieces.length - 1];
       }
     }
     if (current.trim().length >= MIN_CHUNK_LENGTH) {

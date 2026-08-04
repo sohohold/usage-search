@@ -7,5 +7,6 @@ data/
 .DS_Store
 .next/
 out/
+coverage/
 *.tsbuildinfo
 tailwindcss-*.log
