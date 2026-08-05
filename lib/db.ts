@@ -14,16 +14,32 @@ function getClient(): Client {
   return _client;
 }
 
+let _hasAuthorUrl: boolean | null = null;
+
+/**
+ * `works.author_url` was added after the first indexes were built, and selecting a
+ * missing column fails the whole query. Probe once per process and fall back to NULL,
+ * so an index built before the column exists keeps serving results (without the link).
+ */
+async function hasAuthorUrl(client: Client): Promise<boolean> {
+  if (_hasAuthorUrl === null) {
+    const res = await client.execute("SELECT 1 FROM pragma_table_info('works') WHERE name = 'author_url'");
+    _hasAuthorUrl = res.rows.length > 0;
+  }
+  return _hasAuthorUrl;
+}
+
 export async function search(query: string, limit: number, offset: number): Promise<SearchResponse> {
   const client = getClient();
   const ftsQuery = `"${query.replace(/"/g, '""')}"`;
+  const authorUrlColumn = (await hasAuthorUrl(client)) ? 'w.author_url' : 'NULL';
 
   // Fetch limit+1 rows so we can detect if more results exist without a separate COUNT query.
   // ORDER BY rank (not bm25()) lets FTS5 use its optimized ranking path, so snippet() runs
   // only on returned rows. The CAST must stay on the chunks side of the join: chunks.work_id
   // stores a stringified works.id, and casting w.id instead would defeat the works PK index.
   const resultsRes = await client.execute({
-    sql: `SELECT w.title, w.author, w.card_url,
+    sql: `SELECT w.title, w.author, ${authorUrlColumn} AS author_url, w.card_url,
             snippet(chunks, 1, '<mark>', '</mark>', '…', 24) AS snippet,
             snippet(chunks, 1, '<mark>', '</mark>', '…', 64) AS context
      FROM chunks
@@ -40,6 +56,7 @@ export async function search(query: string, limit: number, offset: number): Prom
   const results = rows.map((row) => ({
     title: row.title as string,
     author: row.author as string,
+    author_url: (row.author_url as string | null) ?? null,
     card_url: row.card_url as string,
     snippet: row.snippet as string,
     context: row.context as string,

@@ -8,12 +8,14 @@ export const WORKS = [
     work_id: '773',
     title: 'こころ',
     author: '夏目　漱石',
+    author_url: 'https://www.aozora.gr.jp/index_pages/person148.html',
     card_url: 'https://example.com/cards/card773.html',
   },
   {
     work_id: '900',
     title: '月と六ペンス',
     author: 'モーム　サマセット',
+    author_url: 'https://www.aozora.gr.jp/index_pages/person96.html',
     card_url: 'https://example.com/cards/card900.html',
   },
 ] as const;
@@ -41,21 +43,24 @@ export const TOTAL_CHUNKS = CHUNKS.length;
 /**
  * Build a throwaway SQLite database with the indexer's schema and a known corpus.
  * Returns the `file:` URL to point TURSO_DATABASE_URL at, plus a cleanup function.
+ *
+ * `authorUrl: false` reproduces an index built before the `author_url` column existed.
  */
-export async function createTestDb() {
+export async function createTestDb({ authorUrl = true } = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-search-test-'));
   const dbPath = path.join(dir, 'test.db');
   const client = createClient({ url: `file:${dbPath}` });
 
   await client.execute(`
     CREATE TABLE works (
-      id        INTEGER PRIMARY KEY AUTOINCREMENT,
-      work_id   TEXT UNIQUE NOT NULL,
-      title     TEXT NOT NULL,
-      author    TEXT NOT NULL,
-      card_url  TEXT,
-      file_url  TEXT,
-      encoding  TEXT
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      work_id    TEXT UNIQUE NOT NULL,
+      title      TEXT NOT NULL,
+      author     TEXT NOT NULL,
+      ${authorUrl ? 'author_url TEXT,' : ''}
+      card_url   TEXT,
+      file_url   TEXT,
+      encoding   TEXT
     )
   `);
   await client.execute(`
@@ -68,10 +73,17 @@ export async function createTestDb() {
 
   const ids: string[] = [];
   for (const w of WORKS) {
-    await client.execute({
-      sql: 'INSERT INTO works (work_id, title, author, card_url) VALUES (?, ?, ?, ?)',
-      args: [w.work_id, w.title, w.author, w.card_url],
-    });
+    await client.execute(
+      authorUrl
+        ? {
+            sql: 'INSERT INTO works (work_id, title, author, author_url, card_url) VALUES (?, ?, ?, ?, ?)',
+            args: [w.work_id, w.title, w.author, w.author_url, w.card_url],
+          }
+        : {
+            sql: 'INSERT INTO works (work_id, title, author, card_url) VALUES (?, ?, ?, ?)',
+            args: [w.work_id, w.title, w.author, w.card_url],
+          }
+    );
     const row = await client.execute({
       sql: 'SELECT id FROM works WHERE work_id = ?',
       args: [w.work_id],
