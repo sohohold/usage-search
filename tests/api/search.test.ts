@@ -18,6 +18,7 @@ function response(query = 'テスト'): SearchResponse {
       {
         title: 'こころ',
         author: '夏目　漱石',
+        author_url: 'https://www.aozora.gr.jp/index_pages/person148.html',
         card_url: 'https://example.com/cards/card773.html',
         snippet: 'その夜は<mark>月が綺麗</mark>で',
         context: 'その夜は<mark>月が綺麗</mark>で、私は縁側に腰を下ろしていた。',
@@ -134,6 +135,7 @@ describe('GET /api/search', () => {
     expect(Object.keys(body).sort()).toEqual(['over_limit', 'query', 'results']);
     expect(Object.keys(body.results[0]).sort()).toEqual([
       'author',
+      'author_url',
       'card_url',
       'context',
       'snippet',

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { createTestDb, WORKS, TOTAL_WORKS, TOTAL_CHUNKS } from './helpers/db';
 import { search, getStats } from '@/lib/db';
 
@@ -48,6 +48,11 @@ describe('search', () => {
       author: WORKS[0].author,
       card_url: WORKS[0].card_url,
     });
+  });
+
+  it('DB-16: 作家別作品リストの URL を返す', async () => {
+    const res = await search('縁側に腰', 20, 0);
+    expect(res.results[0].author_url).toBe(WORKS[0].author_url);
   });
 
   it('DB-06: limit の件数だけ返す', async () => {
@@ -106,6 +111,29 @@ describe('search', () => {
     // OR / AND として解釈されれば「月」「星」を含む行にヒットしてしまう。
     expect((await search('月が綺麗 OR 星が', 20, 0)).results).toEqual([]);
     expect((await search('月が綺麗 AND 星が', 20, 0)).results).toEqual([]);
+  });
+});
+
+describe('search（author_url 列を持たない旧インデックス）', () => {
+  it('DB-17: 例外にせず author_url を null として返す', async () => {
+    const legacy = await createTestDb({ authorUrl: false });
+    const current = process.env.TURSO_DATABASE_URL;
+    try {
+      // lib/db はクライアントと列の有無をモジュール内にキャッシュするため、
+      // 旧スキーマの DB を見せるには読み込み直す必要がある。
+      vi.resetModules();
+      process.env.TURSO_DATABASE_URL = legacy.url;
+      const { search: legacySearch } = await import('@/lib/db');
+
+      const res = await legacySearch('縁側に腰', 20, 0);
+      expect(res.results[0]).toMatchObject({
+        author: WORKS[0].author,
+        author_url: null,
+      });
+    } finally {
+      process.env.TURSO_DATABASE_URL = current;
+      legacy.cleanup();
+    }
   });
 });
 

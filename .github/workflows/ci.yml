@@ -95,6 +95,9 @@ jobs:
           RESULT=$(curl -sf "http://localhost:3000/api/search?q=%E3%81%AE%E4%B8%AD%E3%81%AB&limit=5")
           echo "$RESULT" | jq .
           echo "$RESULT" | jq -e '.results | length > 0'
+          # The author link comes from the catalog's person ID, so it only shows up
+          # once a real index has been built.
+          echo "$RESULT" | jq -e '[.results[].author_url | select(startswith("https://www.aozora.gr.jp/index_pages/person"))] | length > 0'
 
       - name: Test short query rejection
         run: |

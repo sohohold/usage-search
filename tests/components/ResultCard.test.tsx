@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getDefaultNormalizer, render, screen } from '@testing-library/react';
+import { cleanup, getDefaultNormalizer, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import ResultCard from '@/components/ResultCard';
 import type { SearchResult } from '@/types';
@@ -8,6 +8,7 @@ import type { SearchResult } from '@/types';
 const RESULT: SearchResult = {
   title: 'こころ',
   author: '夏目　漱石',
+  author_url: 'https://www.aozora.gr.jp/index_pages/person148.html',
   card_url: 'https://example.com/cards/card773.html',
   snippet: 'その夜は<mark>月が綺麗</mark>で',
   context: 'その夜は<mark>月が綺麗</mark>で、私は縁側に腰を下ろしていた。',
@@ -18,9 +19,11 @@ function setup(overrides: Partial<SearchResult> = {}) {
   return {
     user: userEvent.setup(),
     card: screen.getByRole('article'),
-    toggle: screen.getByRole('button'),
   };
 }
+
+/** 展開ボタン。前後の文脈がないカードには存在しない。 */
+const toggle = () => screen.getByRole('button');
 
 /** Make window.getSelection report an active text selection. */
 function withSelection(text: string) {
@@ -47,7 +50,8 @@ describe('ResultCard', () => {
 
   it('UI-21: 図書カードへのリンクを新しいタブで安全に開く', () => {
     setup();
-    for (const link of screen.getAllByRole('link')) {
+    for (const name of ['こころ', '図書カード →']) {
+      const link = screen.getByRole('link', { name });
       expect(link).toHaveAttribute('href', RESULT.card_url);
       expect(link).toHaveAttribute('target', '_blank');
       expect(link.getAttribute('rel')).toContain('noopener');
@@ -94,27 +98,73 @@ describe('ResultCard', () => {
   });
 
   it('UI-28: 展開ボタンが aria-expanded とラベルを状態に合わせる', async () => {
-    const { user, toggle } = setup();
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
-    expect(toggle).toHaveTextContent('＋ 前後の文脈を表示');
+    const { user } = setup();
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle()).toHaveTextContent('＋ 前後の文脈を表示');
 
-    await user.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
-    expect(toggle).toHaveTextContent('− 文脈を閉じる');
+    await user.click(toggle());
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle()).toHaveTextContent('− 文脈を閉じる');
   });
 
   it('UI-29: 展開ボタンのクリックが親カードと二重に発火しない', async () => {
-    const { user, toggle } = setup();
-    await user.click(toggle);
+    const { user } = setup();
+    await user.click(toggle());
     // 二重発火なら展開→即収納で snippet のままになる。
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle()).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText(/縁側に腰を下ろしていた/)).toBeInTheDocument();
   });
 
-  it('UI-30: context が空なら展開しても snippet を表示する', async () => {
-    const { user, card, toggle } = setup({ context: '' });
+  it('UI-30: context が空なら展開ボタンを出さず、クリックしても展開しない', async () => {
+    const { user, card } = setup({ context: '' });
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+
     await user.click(card);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText(/その夜は/)).toHaveTextContent('その夜は月が綺麗で');
+  });
+
+  it('UI-31: context が snippet と同じなら展開ボタンを出さない', async () => {
+    const { user, card } = setup({ context: RESULT.snippet });
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+
+    await user.click(card);
+    expect(screen.getByText(/その夜は/)).toHaveTextContent('その夜は月が綺麗で');
+  });
+
+  it('UI-32: 文脈の有無でカーソルを切り替える', () => {
+    const { card } = setup();
+    expect(card).toHaveClass('cursor-pointer');
+    expect(toggle()).toHaveClass('cursor-pointer');
+
+    cleanup();
+    expect(setup({ context: '' }).card).toHaveClass('cursor-default');
+  });
+
+  it('UI-33: 作家名から作家別作品リストへリンクする', () => {
+    setup();
+    const link = screen.getByRole('link', {
+      name: (content) => content.replace(/\s/g, '') === '夏目漱石',
+    });
+    expect(link).toHaveAttribute('href', RESULT.author_url);
+    expect(link).toHaveAttribute('target', '_blank');
+    expect(link.getAttribute('rel')).toContain('noopener');
+  });
+
+  it('UI-34: author_url がなければリンクにしない', () => {
+    setup({ author_url: null });
+    expect(screen.getAllByRole('link')).toHaveLength(2); // 作品名と図書カードのみ
+    expect(
+      screen.getByText(RESULT.author, {
+        normalizer: getDefaultNormalizer({ collapseWhitespace: false }),
+      })
+    ).toBeInTheDocument();
+  });
+
+  it('UI-35: 作家名リンクのクリックでは展開しない', async () => {
+    const { user } = setup();
+    await user.click(
+      screen.getByRole('link', { name: (content) => content.replace(/\s/g, '') === '夏目漱石' })
+    );
+    expect(screen.queryByText(/縁側に腰を下ろしていた/)).not.toBeInTheDocument();
   });
 });

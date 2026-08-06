@@ -7,6 +7,9 @@ export const MAX_PAGE_SIZE = 50;
 export interface SearchResult {
   title: string;
   author: string;
+  // The author's "作家別作品リスト" page. Null when the catalog row had no person ID,
+  // and absent from responses cached before this field existed.
+  author_url?: string | null;
   card_url: string;
   snippet: string;
   // Wider excerpt around the same match (~2.7x the snippet), shown when a card is expanded.

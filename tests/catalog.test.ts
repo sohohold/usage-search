@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import iconv from 'iconv-lite';
 import {
   decodeText,
+  personListUrl,
   pMap,
   parseCatalog,
   textUrlFromFileUrl,
@@ -12,6 +13,7 @@ import {
 const COLUMNS = [
   '作品ID',
   '作品名',
+  '人物ID',
   '姓',
   '名',
   '図書カードURL',
@@ -26,6 +28,7 @@ function csv(rows: Partial<Record<string, string>>[], { bom = false } = {}) {
   const defaults: Record<string, string> = {
     作品ID: '773',
     作品名: 'こころ',
+    人物ID: '000148',
     姓: '夏目',
     名: '漱石',
     図書カードURL: 'https://www.aozora.gr.jp/cards/000148/card773.html',
@@ -102,6 +105,36 @@ describe('parseCatalog', () => {
     const rows = parseCatalog(csv([{}], { bom: true }));
     expect(rows).toHaveLength(1);
     expect(rows[0].work_id).toBe('773');
+  });
+
+  it('IX-23: 著者名と同じ行の人物IDから author_url を作る', () => {
+    const rows = parseCatalog(csv([{ 人物ID: '001529', 姓: '作者不詳', 名: '' }]));
+    expect(rows[0]).toMatchObject({
+      author: '作者不詳',
+      author_url: 'https://www.aozora.gr.jp/index_pages/person1529.html',
+    });
+  });
+
+  it('IX-23: 人物ID がない行は author_url が null', () => {
+    expect(parseCatalog(csv([{ 人物ID: '' }]))[0].author_url).toBeNull();
+  });
+});
+
+describe('personListUrl', () => {
+  it('IX-21: 人物IDのゼロ埋めを外して作家別作品リストの URL を作る', () => {
+    expect(personListUrl('000148')).toBe('https://www.aozora.gr.jp/index_pages/person148.html');
+    expect(personListUrl('001529')).toBe('https://www.aozora.gr.jp/index_pages/person1529.html');
+    expect(personListUrl(' 000081 ')).toBe(
+      'https://www.aozora.gr.jp/index_pages/person81.html'
+    );
+  });
+
+  it('IX-22: 空・数字以外の人物IDは null', () => {
+    expect(personListUrl('')).toBeNull();
+    expect(personListUrl('   ')).toBeNull();
+    expect(personListUrl(undefined)).toBeNull();
+    expect(personListUrl('000148x')).toBeNull();
+    expect(personListUrl('000000')).toBeNull();
   });
 });
 

@@ -12,9 +12,26 @@ export interface CatalogRow {
   work_id: string;
   title: string;
   author: string;
+  /** The author's "作家別作品リスト" page, or null when the row has no usable person ID. */
+  author_url: string | null;
   card_url: string;
   file_url: string;
   encoding: string;
+}
+
+/**
+ * Build the "作家別作品リスト" URL for a catalog person ID.
+ * The catalog zero-pads the ID to six digits (`000148`) but the page does not
+ * (`person148.html`). Returns null for a missing or non-numeric ID.
+ *
+ * The ID must come from the same catalog row as the author name: one work has one
+ * row per contributor, and the 図書カードURL points at the work's main author, who
+ * is not necessarily the contributor named on that row.
+ */
+export function personListUrl(personId: string | undefined): string | null {
+  const id = (personId ?? '').trim().replace(/^0+/, '');
+  if (!/^\d+$/.test(id)) return null;
+  return `https://www.aozora.gr.jp/index_pages/person${id}.html`;
 }
 
 /**
@@ -51,6 +68,7 @@ export function parseCatalog(csvBuffer: Buffer): CatalogRow[] {
       title: r['作品名'],
       // Surname and given name are separate columns; either may be empty.
       author: `${r['姓']}　${r['名']}`.trim(),
+      author_url: personListUrl(r['人物ID']),
       card_url: r['図書カードURL'],
       file_url: r['テキストファイルURL'],
       encoding: r['テキストファイル符号化方式']?.trim() || 'ShiftJIS',

@@ -106,15 +106,22 @@ async function setupDb(): Promise<Client> {
 
   await client.execute(`
     CREATE TABLE IF NOT EXISTS works (
-      id        INTEGER PRIMARY KEY AUTOINCREMENT,
-      work_id   TEXT UNIQUE NOT NULL,
-      title     TEXT NOT NULL,
-      author    TEXT NOT NULL,
-      card_url  TEXT,
-      file_url  TEXT,
-      encoding  TEXT
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      work_id    TEXT UNIQUE NOT NULL,
+      title      TEXT NOT NULL,
+      author     TEXT NOT NULL,
+      author_url TEXT,
+      card_url   TEXT,
+      file_url   TEXT,
+      encoding   TEXT
     )
   `);
+  // Databases built before author_url existed keep their schema through CREATE TABLE
+  // IF NOT EXISTS, so --resume would fail on the INSERT below without this.
+  const columns = await client.execute("SELECT name FROM pragma_table_info('works')");
+  if (!columns.rows.some((r) => r.name === 'author_url')) {
+    await client.execute('ALTER TABLE works ADD COLUMN author_url TEXT');
+  }
   await client.execute(`
     CREATE TABLE IF NOT EXISTS index_log (
       work_id   TEXT PRIMARY KEY,
@@ -212,9 +219,17 @@ async function main() {
         const tx = await client.transaction('write');
         try {
           await tx.execute({
-            sql: `INSERT OR IGNORE INTO works (work_id, title, author, card_url, file_url, encoding)
-                  VALUES (?, ?, ?, ?, ?, ?)`,
-            args: [work.work_id, work.title, work.author, work.card_url, work.file_url, work.encoding],
+            sql: `INSERT OR IGNORE INTO works (work_id, title, author, author_url, card_url, file_url, encoding)
+                  VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            args: [
+              work.work_id,
+              work.title,
+              work.author,
+              work.author_url,
+              work.card_url,
+              work.file_url,
+              work.encoding,
+            ],
           });
           const row = await tx.execute({
             sql: 'SELECT id FROM works WHERE work_id = ?',
