@@ -24,6 +24,19 @@ export const WORKS = [
 export const LONG_CHUNK =
   'あ'.repeat(120) + 'ここに目印となる語がある。' + 'い'.repeat(120);
 
+/**
+ * テスト仕様書 §9（短いクエリ）の要件を検証するための本文。
+ * 既存の行の期待値を動かさないよう、`月が綺麗` などの語とはぶつけていない。
+ */
+export const SHORT_QUERY_CHUNKS = {
+  /** 末尾が1文字の検索対象（`月`）で終わる。後続の文字がない位置の索引漏れを突く。 */
+  tailChar: '窓の外はもう暗く、雲の切れ間からのぞいたのは細い月',
+  /** 英字の大小同一視。 */
+  ascii: 'ノートには A と a が並べて書きつけてあった。',
+  /** 補助面（サロゲートペア）の1文字。 */
+  surrogate: '𠮟るという字は、いまも手書きでは書きにくい。',
+} as const;
+
 export const CHUNKS: { work: 0 | 1; text: string }[] = [
   { work: 0, text: 'その夜は月が綺麗で、私は縁側に腰を下ろしていた。' },
   { work: 1, text: '空を見上げると月が綺麗だと素直に思えた。' },
@@ -35,6 +48,9 @@ export const CHUNKS: { work: 0 | 1; text: string }[] = [
     work: (i % 2) as 0 | 1,
     text: `ページング検証用の第${String(i).padStart(2, '0')}番目の段落である。`,
   })),
+  { work: 0, text: SHORT_QUERY_CHUNKS.tailChar },
+  { work: 1, text: SHORT_QUERY_CHUNKS.ascii },
+  { work: 0, text: SHORT_QUERY_CHUNKS.surrogate },
 ];
 
 export const TOTAL_WORKS = WORKS.length;
