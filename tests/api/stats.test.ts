@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { getStats } from '@/lib/db';
+import { getStats } from '@/lib/search';
 import { GET } from '@/app/api/stats/route';
 
-vi.mock('@/lib/db', () => ({ search: vi.fn(), getStats: vi.fn() }));
+vi.mock('@/lib/search', () => ({ search: vi.fn(), getStats: vi.fn() }));
 
 const getStatsMock = vi.mocked(getStats);
 

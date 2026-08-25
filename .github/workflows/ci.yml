@@ -11,6 +11,23 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    # 短いクエリ（1〜2文字）のテストは実物の Elasticsearch に対して走らせる。
+    # 起動していない環境ではテスト側が自動でスキップする。
+    services:
+      elasticsearch:
+        image: elasticsearch:9.5.2
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "false"
+          ES_JAVA_OPTS: -Xms1g -Xmx1g
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9200/_cluster/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
+
     steps:
       - uses: actions/checkout@v4
 
@@ -26,6 +43,8 @@ jobs:
 
       - name: Test
         run: npm test
+        env:
+          ELASTICSEARCH_URL: http://localhost:9200
 
       - name: Build
         run: npm run build
@@ -33,6 +52,21 @@ jobs:
   e2e-test:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+
+    services:
+      elasticsearch:
+        image: elasticsearch:9.5.2
+        env:
+          discovery.type: single-node
+          xpack.security.enabled: "false"
+          ES_JAVA_OPTS: -Xms1g -Xmx1g
+        ports:
+          - 9200:9200
+        options: >-
+          --health-cmd "curl -fsS http://localhost:9200/_cluster/health"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 20
 
     steps:
       - uses: actions/checkout@v4
@@ -103,3 +137,42 @@ jobs:
         run: |
           STATUS=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3000/api/search?q=ab")
           [ "$STATUS" = "400" ] && echo "Correctly rejected 2-char query" || exit 1
+
+      # ここからは Elasticsearch バックエンド。同じ SQLite の索引を ES に載せ替え、
+      # 1〜2文字が実際に引けることを通しで確認する。
+      - name: Load index into Elasticsearch
+        run: npm run index:es
+        env:
+          DB_PATH: ./data/aozora.db
+          ELASTICSEARCH_URL: http://localhost:9200
+
+      - name: Start server (Elasticsearch backend)
+        run: npm run dev &
+        env:
+          SEARCH_BACKEND: elasticsearch
+          ELASTICSEARCH_URL: http://localhost:9200
+          NEXT_PUBLIC_MIN_QUERY_LENGTH: "1"
+          PORT: "3001"
+
+      - name: Wait for server (Elasticsearch backend)
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:3001/api/stats > /dev/null 2>&1; then
+              echo "Server ready"
+              break
+            fi
+            sleep 1
+          done
+
+      - name: Test 1-2 character search (Elasticsearch)
+        run: |
+          for Q in %E6%9C%88 %E6%9C%88%E3%81%8C %E3%81%AE%E4%B8%AD%E3%81%AB; do
+            RESULT=$(curl -sf "http://localhost:3001/api/search?q=$Q&limit=5")
+            echo "$RESULT" | jq -e '.results | length > 0'
+            echo "$RESULT" | jq -e '[.results[].snippet | select(contains("<mark>"))] | length > 0'
+          done
+          STATS=$(curl -sf http://localhost:3001/api/stats)
+          echo "$STATS" | jq -e '.works > 0 and .chunks > 0'
+          # 空クエリだけは変わらず 400。
+          STATUS=$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:3001/api/search?q=")
+          [ "$STATUS" = "400" ] || exit 1

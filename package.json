@@ -10,9 +10,13 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "index": "tsx scripts/build-index.ts"
+    "index": "tsx scripts/build-index.ts",
+    "index:es": "tsx scripts/es-load.ts",
+    "es:up": "docker compose up -d --wait elasticsearch",
+    "es:down": "docker compose down -v"
   },
   "dependencies": {
+    "@elastic/elasticsearch": "^9.5.0",
     "@libsql/client": "^0.17.4",
     "@vercel/analytics": "^2.0.1",
     "next": "^16.2.10",

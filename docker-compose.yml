@@ -1,0 +1,18 @@
+# ローカル開発と CI 用の Elasticsearch。単一ノード・認証なし・データは使い捨て。
+# 本番（Elastic Cloud / 自前ホスト）の設定はここではなく docs/elasticsearch.md を参照。
+services:
+  elasticsearch:
+    image: elasticsearch:9.5.2
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.license.self_generated.type=basic
+      # 開発用の控えめなヒープ。全件索引（約800MB）を載せるなら 2g 以上を推奨。
+      - ES_JAVA_OPTS=-Xms1g -Xmx1g
+    ports:
+      - '9200:9200'
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -fsS http://localhost:9200/_cluster/health | grep -qE "green|yellow"']
+      interval: 5s
+      timeout: 5s
+      retries: 30

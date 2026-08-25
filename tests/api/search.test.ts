@@ -1,10 +1,15 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { NextRequest } from 'next/server';
-import { search } from '@/lib/db';
+import { search } from '@/lib/search';
 import { GET } from '@/app/api/search/route';
-import { MIN_QUERY_LENGTH, PAGE_SIZE, type SearchResponse } from '@/types';
+import { MAX_RESULT_WINDOW, MIN_QUERY_LENGTH, PAGE_SIZE, type SearchResponse } from '@/types';
 
-vi.mock('@/lib/db', () => ({ search: vi.fn(), getStats: vi.fn() }));
+vi.mock('@/lib/search', () => ({
+  search: vi.fn(),
+  getStats: vi.fn(),
+  // 既定バックエンド（SQLite）の下限。Elasticsearch では 1 になる（SQ-14）。
+  minQueryLength: () => 3,
+}));
 
 const searchMock = vi.mocked(search);
 
@@ -107,6 +112,13 @@ describe('GET /api/search', () => {
   it('API-11: 負の offset は 0 に丸める', async () => {
     await get('?q=abc&offset=-5');
     expect(searchMock).toHaveBeenCalledWith('abc', PAGE_SIZE, 0);
+  });
+
+  it('API-16: 深すぎる offset は結果窓の手前に丸める', async () => {
+    const res = await get('?q=テスト&offset=999999');
+    expect(res.status).toBe(200);
+    const [, limit, offset] = searchMock.mock.calls[0];
+    expect(offset).toBe(MAX_RESULT_WINDOW - limit - 1);
   });
 
   it('API-12: 成功時は CDN キャッシュヘッダを付ける', async () => {

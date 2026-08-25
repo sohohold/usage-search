@@ -10,13 +10,15 @@
 Next.js App Router（React 19 + Tailwind CSS 4）
   ├─ app/page.tsx + components/*  ...... UI（クライアントコンポーネント）
   └─ app/api/{search,stats}/route.ts ... Route Handlers（サーバー）
-    ↓ @libsql/client
-Turso（libSQL）— SQLite FTS5 + trigramトークナイザー
+    ↓ lib/search.ts（SEARCH_BACKEND で振り分け）
+    ├─ Turso（libSQL）— SQLite FTS5 + trigram      … 既定。3文字以上のみ
+    └─ Elasticsearch — n-gram（ユニグラム/バイグラム） … 1文字から引ける
 ```
 
-- **検索エンジン**: SQLite FTS5 + trigramトークナイザー
-  - 外部の全文検索サービス不要
-  - 日本語の任意部分文字列マッチに対応
+- **検索エンジン**: 2系統を切り替えられます（移行期間）
+  - **Elasticsearch**（`SEARCH_BACKEND=elasticsearch`）: n-gram 索引で**1文字から**部分文字列検索。
+    ハイライトも Elasticsearch 側で生成。設計と根拠は [Elasticsearch バックエンド](./docs/elasticsearch.md)
+  - **SQLite FTS5 + trigram**（既定）: 外部サービス不要。ただし**3文字未満は引けない**
 - **フロントエンド/バックエンド**: Next.js 1つのアプリに統合（別リポジトリ・別プロセスの分離なし）
 - **データベース**: [Turso](https://turso.tech/)（libSQL）。ローカル開発では `file:` URLでSQLiteファイルをそのまま利用できるため、Tursoアカウントなしでも動作確認可能
 - **デプロイ**: Vercelなど、Next.jsをホスティングできる環境 + Turso
@@ -124,16 +126,16 @@ npm run build && npm run start   # 本番ビルド・起動
 
 ## 検索仕様
 
-- 3文字以上のワードが対象（trigramトークナイザーの制約上、2文字以下は検索不可）
-  — **日本語の検索としては欠落**であり、解消方法を [1〜2文字クエリの検索方式](./docs/short-query-search.md)
-  に、要件を [テスト仕様書 §9](./docs/test-spec.md) にまとめてあります（仕様先行・実装は未着手）
-- SQLite FTS5 trigramによる完全部分一致検索
+- 対象の文字数はバックエンド次第。Elasticsearch なら**1文字から**、SQLite（既定）は3文字以上
+  （trigram トークナイザーの制約上、2文字以下は原理的にマッチしない）
+- 完全部分一致検索（語の区切りに依存しない）。Elasticsearch 側も形態素解析ではなく n-gram を使う
 - インデックスの単位は段落。段落内の改行は ` / ` に置き換えて1行にまとめ、400文字を超える段落は分割
 - 1リクエストあたり既定20件（最大50件）取得。「もっと見る」でオフセットページングし、追加分をこれまでの結果に継続表示（表示件数の上限なし）
 - 各結果はKWIC形式の前後文脈付きで表示。結果カードをクリックするとより広い範囲の文脈に展開表示。段落が短く、広げても表示が変わらない場合は展開しない（「前後の文脈を表示」も出さない）
 - 作品名・図書カードは図書カードへ、作家名は青空文庫の「作家別作品リスト」へリンク
-- 3文字以上の入力は400msデバウンスして自動検索。入力中に前のリクエストが残っていれば中断し、最新のクエリを優先
-- 2文字以下は自動検索しないが、Enterまたは検索ボタンで明示的に送信でき、その場合はサーバーが理由（3文字以上必要）を返す
+- `MIN_QUERY_LENGTH`（既定3、Elasticsearch では `NEXT_PUBLIC_MIN_QUERY_LENGTH=1`）以上の入力は
+  400msデバウンスして自動検索。入力中に前のリクエストが残っていれば中断し、最新のクエリを優先
+- それ未満は自動検索しないが、Enterまたは検索ボタンで明示的に送信でき、その場合はサーバーが理由を返す
 - 検索結果・統計情報はCDNで24時間キャッシュ（`stale-while-revalidate`で最大7日間）
 
 ## テスト
