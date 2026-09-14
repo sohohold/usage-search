@@ -118,3 +118,55 @@ export async function withRetry<T>(
     }
   }
 }
+
+/** What `--resume` may do with an existing index, given the catalog it was built from. */
+export type ResumeVerdict = 'resume' | 'adopt' | 'reject';
+
+/**
+ * Decide whether an existing index may be resumed against `current`.
+ *
+ * `stored` is the catalog URL recorded when the index was built, or null for a
+ * database made before the source was recorded. Nothing is known about such an
+ * index, which is not the same as knowing it differs, so it is adopted rather
+ * than rejected.
+ */
+export function resumeVerdict(stored: string | null, current: string): ResumeVerdict {
+  if (stored === null) return 'adopt';
+  return stored === current ? 'resume' : 'reject';
+}
+
+/**
+ * Whether an index recorded as built from `stored` must be left alone when
+ * indexing from `current`.
+ *
+ * Resuming skips the works already marked ok, and a plain run keeps the rows it
+ * already holds (works are inserted with INSERT OR IGNORE), so either way an
+ * index carrying works from another catalog ends up mixing the two. An empty
+ * index has nothing to mix, so only a populated one blocks a plain run.
+ *
+ * `indexed` is how many works the index holds, not how many were attempted: a
+ * run that only logged skips or errors left no rows to mix.
+ */
+export function catalogSourceBlocks(
+  stored: string | null,
+  current: string,
+  { resume, indexed }: { resume: boolean; indexed: number }
+): boolean {
+  if (resumeVerdict(stored, current) !== 'reject') return false;
+  return resume || indexed > 0;
+}
+
+/**
+ * Absolute URL to follow for a redirect from `currentUrl` to `location`.
+ *
+ * A Location header may be relative, which http.get rejects outright, so it is
+ * resolved against the URL just requested. An absolute http:// target is
+ * upgraded to https first, to avoid port-80 blocks; upgrading is deliberately
+ * applied to the header rather than the resolved URL, so that a relative
+ * target keeps the scheme the caller chose rather than being rewritten.
+ *
+ * Throws if the result is not a usable URL.
+ */
+export function redirectTarget(location: string, currentUrl: string): string {
+  return new URL(location.replace(/^http:\/\//i, 'https://'), currentUrl).toString();
+}

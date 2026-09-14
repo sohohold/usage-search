@@ -131,6 +131,17 @@
 | IX-21 | 作家別作品リスト URL | 人物ID `000148` | `https://www.aozora.gr.jp/index_pages/person148.html`（ゼロ埋めを外す） |
 | IX-22 | 人物ID が使えない | 空・空白のみ・数字以外 | `null` を返す |
 | IX-23 | 目録行との対応 | 姓名と人物IDを持つ行 | `author` と同じ行の人物IDから `author_url` を組み立てる |
+| IX-24 | `resumeVerdict`: 取得元が一致 | 記録された取得元 = 現在の `CATALOG_URL` | `resume`（再開してよい） |
+| IX-25 | `resumeVerdict`: 取得元が相違 | 記録された取得元 ≠ 現在の `CATALOG_URL` | `reject`（`--resume` を拒否する） |
+| IX-26 | `resumeVerdict`: 記録なし | 取得元が記録されていない索引 | `adopt`（照合できないため現在の取得元を記録して続行） |
+| IX-27 | `catalogSourceBlocks`: 取得元が一致 | `--resume` の有無・索引済み件数によらず | 妨げない |
+| IX-28 | `catalogSourceBlocks`: 取得元が相違 | `--resume` あり、または索引が作品を1件以上持つ | 妨げる（`INSERT OR IGNORE` で旧目録の行が残るため） |
+| IX-29 | `catalogSourceBlocks`: 空の索引 | 取得元が相違・`--resume` なし・作品0件 | 妨げない（混ざる行がない。skip や error だけの記録は作品を残さない） |
+| IX-30 | `catalogSourceBlocks`: 記録なし | 取得元が記録されていない索引 | 妨げない（照合できない） |
+| IX-31 | `redirectTarget`: 相対 Location | `/catalog.zip` や `catalog.zip` | 現在の URL に対して解決した絶対 URL |
+| IX-32 | `redirectTarget`: 絶対 http | `http://…` への Location | https に上げる（port 80 の遮断を避けるため） |
+| IX-33 | `redirectTarget`: 相対のスキーム | http のベース + 相対 Location | ベースのスキームを保つ（呼び出し側の選択を書き換えない） |
+| IX-34 | `redirectTarget`: 解釈不能 | URL として解釈できない組み合わせ | throw する（呼び出し側が reject に変換） |
 
 > ネットワークへの実アクセス（`download` / `downloadCatalog`）は対象外です（§9）。
 

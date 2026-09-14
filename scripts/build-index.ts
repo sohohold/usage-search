@@ -25,14 +25,32 @@ import https from 'https';
 import http from 'http';
 import { fileURLToPath } from 'url';
 import { cleanAozoraText, splitIntoChunks } from './aozora.js';
-import { decodeText, pMap, parseCatalog, textUrlFromFileUrl, withRetry } from './catalog.js';
+import {
+  catalogSourceBlocks,
+  decodeText,
+  pMap,
+  parseCatalog,
+  redirectTarget,
+  resumeVerdict,
+  textUrlFromFileUrl,
+  withRetry,
+} from './catalog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR ?? path.join(__dirname, '../data');
 const DB_PATH = process.env.DB_PATH ?? path.join(DATA_DIR, 'aozora.db');
+// The catalog comes from aozora.gr.jp itself. It used to come from the
+// aozorabunko/aozorabunko GitHub mirror, but that repository now 404s on
+// master, main and gh-pages alike, card paths included.
+// Bodies still come from the aozorahack/aozorabunko_text mirror, which is
+// healthy -- see textUrlFromFileUrl in catalog.ts.
 const CATALOG_URL =
-  'https://raw.githubusercontent.com/aozorabunko/aozorabunko/master/index_pages/list_person_all_extended_utf8.zip';
+  process.env.CATALOG_URL ??
+  'https://www.aozora.gr.jp/index_pages/list_person_all_extended_utf8.zip';
 const CATALOG_PATH = path.join(DATA_DIR, 'catalog.zip');
+// Records which URL the cached catalog came from. Without it, changing
+// CATALOG_URL would keep reading whatever archive a previous run left behind.
+const CATALOG_SOURCE_PATH = `${CATALOG_PATH}.source`;
 
 const args = process.argv.slice(2);
 const LIMIT = (() => {
@@ -48,17 +66,27 @@ const CONCURRENCY = 5;
 
 const CONNECT_TIMEOUT_MS = 30_000;
 
+// Node sends no User-Agent at all unless one is set. Requests without it were
+// answered with a redirect to mirror.aozora.gr.jp, which then never responded
+// from CI runners, while www.aozora.gr.jp serves the catalog fine to ordinary
+// clients. Identify ourselves rather than going out anonymously.
+const USER_AGENT = 'aozora-usage-search/1.0 (+https://github.com/sohohold/usage-search)';
+
 function download(url: string, dest: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const proto = url.startsWith('https') ? https : http;
     const file = fs.createWriteStream(dest);
-    const req = proto.get(url, (res) => {
+    const req = proto.get(url, { headers: { 'User-Agent': USER_AGENT } }, (res) => {
       if (res.statusCode !== undefined && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         file.close();
         try { fs.unlinkSync(dest); } catch {}
-        // Upgrade HTTP redirects to HTTPS to avoid port-80 blocks
-        const location = res.headers.location.replace(/^http:\/\//i, 'https://');
-        return download(location, dest).then(resolve, reject);
+        let target: string;
+        try {
+          target = redirectTarget(res.headers.location, url);
+        } catch {
+          return reject(new Error(`Invalid redirect to ${res.headers.location} from ${url}`));
+        }
+        return download(target, dest).then(resolve, reject);
       }
       if (res.statusCode !== 200) {
         file.close();
@@ -129,6 +157,14 @@ async function setupDb(): Promise<Client> {
       indexed_at INTEGER NOT NULL
     )
   `);
+  // Holds which catalog the index was built from, so --resume can tell whether
+  // the rows already in the database belong to the catalog being indexed now.
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS meta (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
   await client.execute(`
     CREATE VIRTUAL TABLE IF NOT EXISTS chunks USING fts5(
       work_id UNINDEXED,
@@ -145,9 +181,18 @@ async function setupDb(): Promise<Client> {
 // ---------------------------------------------------------------------------
 
 async function downloadCatalog(): Promise<Buffer> {
-  if (!fs.existsSync(CATALOG_PATH)) {
+  const cachedSource = fs.existsSync(CATALOG_SOURCE_PATH)
+    ? fs.readFileSync(CATALOG_SOURCE_PATH, 'utf8').trim()
+    : null;
+
+  // A catalog left by an earlier run is only reusable when it came from the
+  // URL in use now. Otherwise --resume, or any run after CATALOG_URL changes,
+  // would index from the previous source without saying so.
+  if (!fs.existsSync(CATALOG_PATH) || cachedSource !== CATALOG_URL) {
     console.log('Downloading catalog...');
+    fs.mkdirSync(DATA_DIR, { recursive: true });
     await downloadWithRetry(CATALOG_URL, CATALOG_PATH);
+    fs.writeFileSync(CATALOG_SOURCE_PATH, CATALOG_URL);
   }
   const zip = new AdmZip(CATALOG_PATH);
   const entry = zip.getEntries().find((e) => e.entryName.endsWith('.csv'));
@@ -159,9 +204,70 @@ async function downloadCatalog(): Promise<Buffer> {
 // Main
 // ---------------------------------------------------------------------------
 
+const META_CATALOG_URL = 'catalog_url';
+
+async function readMeta(db: Client, key: string): Promise<string | null> {
+  const res = await db.execute({ sql: 'SELECT value FROM meta WHERE key = ?', args: [key] });
+  return res.rows.length > 0 ? (res.rows[0].value as string) : null;
+}
+
+/**
+ * How many works the index actually holds.
+ *
+ * Counts `works` rather than `index_log`: a work logged as skip, no_text,
+ * empty or error never reached `works`, so those entries are not content the
+ * catalog label has to account for.
+ */
+async function countIndexedWorks(db: Client): Promise<number> {
+  const res = await db.execute('SELECT count(*) AS n FROM works');
+  return Number(res.rows[0].n);
+}
+
+/**
+ * Refuse to index into an index built from a different catalog, then record the
+ * catalog in use. Runs before the download so a rejected run costs nothing.
+ */
+async function checkCatalogSource(db: Client): Promise<void> {
+  const stored = await readMeta(db, META_CATALOG_URL);
+  const indexed = await countIndexedWorks(db);
+
+  if (catalogSourceBlocks(stored, CATALOG_URL, { resume: RESUME, indexed })) {
+    console.error(
+      [
+        'This index was built from a different catalog:',
+        `  indexed from: ${stored}`,
+        `  asked for:    ${CATALOG_URL}`,
+        RESUME
+          ? '--resume skips every work already marked ok, so those would keep the'
+          : 'Works already indexed are kept as they are, so those would keep the',
+        'metadata and text produced from the old catalog.',
+        `Delete ${DB_PATH} and index again, or point CATALOG_URL back at the`,
+        'catalog this index was built from.',
+      ].join('\n')
+    );
+    process.exit(1);
+  }
+
+  if (RESUME && resumeVerdict(stored, CATALOG_URL) === 'adopt') {
+    console.warn(
+      `This index predates catalog tracking, so there is nothing to compare against. Recording ${CATALOG_URL} and continuing.`
+    );
+  }
+
+  // Safe to claim the catalog now: the check above leaves only an empty index
+  // or one already built from this same catalog, so there are no rows from
+  // elsewhere for this label to misdescribe.
+  await db.execute({
+    sql: 'INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)',
+    args: [META_CATALOG_URL, CATALOG_URL],
+  });
+}
+
 async function main() {
   console.log(`DB: ${DB_PATH}`);
   const client = await setupDb();
+
+  await checkCatalogSource(client);
 
   const csvBuffer = await downloadCatalog();
   let works = parseCatalog(csvBuffer);
