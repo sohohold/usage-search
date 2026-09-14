@@ -57,11 +57,17 @@ const CONCURRENCY = 5;
 
 const CONNECT_TIMEOUT_MS = 30_000;
 
+// Node sends no User-Agent at all unless one is set. Requests without it were
+// answered with a redirect to mirror.aozora.gr.jp, which then never responded
+// from CI runners, while www.aozora.gr.jp serves the catalog fine to ordinary
+// clients. Identify ourselves rather than going out anonymously.
+const USER_AGENT = 'aozora-usage-search/1.0 (+https://github.com/sohohold/usage-search)';
+
 function download(url: string, dest: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const proto = url.startsWith('https') ? https : http;
     const file = fs.createWriteStream(dest);
-    const req = proto.get(url, (res) => {
+    const req = proto.get(url, { headers: { 'User-Agent': USER_AGENT } }, (res) => {
       if (res.statusCode !== undefined && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         file.close();
         try { fs.unlinkSync(dest); } catch {}
