@@ -131,6 +131,9 @@
 | IX-21 | 作家別作品リスト URL | 人物ID `000148` | `https://www.aozora.gr.jp/index_pages/person148.html`（ゼロ埋めを外す） |
 | IX-22 | 人物ID が使えない | 空・空白のみ・数字以外 | `null` を返す |
 | IX-23 | 目録行との対応 | 姓名と人物IDを持つ行 | `author` と同じ行の人物IDから `author_url` を組み立てる |
+| IX-24 | `resumeVerdict`: 取得元が一致 | 記録された取得元 = 現在の `CATALOG_URL` | `resume`（再開してよい） |
+| IX-25 | `resumeVerdict`: 取得元が相違 | 記録された取得元 ≠ 現在の `CATALOG_URL` | `reject`（`--resume` を拒否する） |
+| IX-26 | `resumeVerdict`: 記録なし | 取得元が記録されていない索引 | `adopt`（照合できないため現在の取得元を記録して続行） |
 
 > ネットワークへの実アクセス（`download` / `downloadCatalog`）は対象外です（§9）。
 

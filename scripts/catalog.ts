@@ -118,3 +118,19 @@ export async function withRetry<T>(
     }
   }
 }
+
+/** What `--resume` may do with an existing index, given the catalog it was built from. */
+export type ResumeVerdict = 'resume' | 'adopt' | 'reject';
+
+/**
+ * Decide whether an existing index may be resumed against `current`.
+ *
+ * `stored` is the catalog URL recorded when the index was built, or null for a
+ * database made before the source was recorded. Nothing is known about such an
+ * index, which is not the same as knowing it differs, so it is adopted rather
+ * than rejected.
+ */
+export function resumeVerdict(stored: string | null, current: string): ResumeVerdict {
+  if (stored === null) return 'adopt';
+  return stored === current ? 'resume' : 'reject';
+}

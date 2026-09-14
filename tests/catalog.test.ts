@@ -5,6 +5,7 @@ import {
   personListUrl,
   pMap,
   parseCatalog,
+  resumeVerdict,
   textUrlFromFileUrl,
   withRetry,
   RETRY_DELAYS,
@@ -222,5 +223,22 @@ describe('withRetry', () => {
       }, [0, 0, 0])
     ).rejects.toThrow('attempt 4');
     expect(calls).toBe(4);
+  });
+});
+
+describe('resumeVerdict', () => {
+  const AOZORA = 'https://www.aozora.gr.jp/index_pages/list_person_all_extended_utf8.zip';
+  const OTHER = 'https://example.com/list_person_all_extended_utf8.zip';
+
+  it('IX-24: 記録された取得元が一致すれば再開できる', () => {
+    expect(resumeVerdict(AOZORA, AOZORA)).toBe('resume');
+  });
+
+  it('IX-25: 取得元が変わっていれば拒否する', () => {
+    expect(resumeVerdict(OTHER, AOZORA)).toBe('reject');
+  });
+
+  it('IX-26: 取得元の記録がない索引は照合できないので引き継ぐ', () => {
+    expect(resumeVerdict(null, AOZORA)).toBe('adopt');
   });
 });
