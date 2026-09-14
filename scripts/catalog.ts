@@ -143,6 +143,9 @@ export function resumeVerdict(stored: string | null, current: string): ResumeVer
  * already holds (works are inserted with INSERT OR IGNORE), so either way an
  * index carrying works from another catalog ends up mixing the two. An empty
  * index has nothing to mix, so only a populated one blocks a plain run.
+ *
+ * `indexed` is how many works the index holds, not how many were attempted: a
+ * run that only logged skips or errors left no rows to mix.
  */
 export function catalogSourceBlocks(
   stored: string | null,

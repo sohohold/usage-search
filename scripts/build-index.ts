@@ -206,8 +206,15 @@ async function readMeta(db: Client, key: string): Promise<string | null> {
   return res.rows.length > 0 ? (res.rows[0].value as string) : null;
 }
 
-async function countIndexed(db: Client): Promise<number> {
-  const res = await db.execute('SELECT count(*) AS n FROM index_log');
+/**
+ * How many works the index actually holds.
+ *
+ * Counts `works` rather than `index_log`: a work logged as skip, no_text,
+ * empty or error never reached `works`, so those entries are not content the
+ * catalog label has to account for.
+ */
+async function countIndexedWorks(db: Client): Promise<number> {
+  const res = await db.execute('SELECT count(*) AS n FROM works');
   return Number(res.rows[0].n);
 }
 
@@ -217,7 +224,7 @@ async function countIndexed(db: Client): Promise<number> {
  */
 async function checkCatalogSource(db: Client): Promise<void> {
   const stored = await readMeta(db, META_CATALOG_URL);
-  const indexed = await countIndexed(db);
+  const indexed = await countIndexedWorks(db);
 
   if (catalogSourceBlocks(stored, CATALOG_URL, { resume: RESUME, indexed })) {
     console.error(
