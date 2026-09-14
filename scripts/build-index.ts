@@ -30,15 +30,18 @@ import { decodeText, pMap, parseCatalog, textUrlFromFileUrl, withRetry } from '.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR ?? path.join(__dirname, '../data');
 const DB_PATH = process.env.DB_PATH ?? path.join(DATA_DIR, 'aozora.db');
-// 目録は青空文庫本家から取得する。以前は aozorabunko/aozorabunko のGitHubミラーを
-// 見ていたが、このリポジトリは master/main/gh-pages のいずれでも 404 を返すように
-// なり、目録だけでなくカード配下のパスも含めて到達できなくなった。
-// 本文は引き続き aozorahack/aozorabunko_text のミラーから取得する（catalog.ts の
-// textUrlFromFileUrl を参照）。こちらは健在。
+// The catalog comes from aozora.gr.jp itself. It used to come from the
+// aozorabunko/aozorabunko GitHub mirror, but that repository now 404s on
+// master, main and gh-pages alike, card paths included.
+// Bodies still come from the aozorahack/aozorabunko_text mirror, which is
+// healthy -- see textUrlFromFileUrl in catalog.ts.
 const CATALOG_URL =
   process.env.CATALOG_URL ??
   'https://www.aozora.gr.jp/index_pages/list_person_all_extended_utf8.zip';
 const CATALOG_PATH = path.join(DATA_DIR, 'catalog.zip');
+// Records which URL the cached catalog came from. Without it, changing
+// CATALOG_URL would keep reading whatever archive a previous run left behind.
+const CATALOG_SOURCE_PATH = `${CATALOG_PATH}.source`;
 
 const args = process.argv.slice(2);
 const LIMIT = (() => {
@@ -151,9 +154,18 @@ async function setupDb(): Promise<Client> {
 // ---------------------------------------------------------------------------
 
 async function downloadCatalog(): Promise<Buffer> {
-  if (!fs.existsSync(CATALOG_PATH)) {
+  const cachedSource = fs.existsSync(CATALOG_SOURCE_PATH)
+    ? fs.readFileSync(CATALOG_SOURCE_PATH, 'utf8').trim()
+    : null;
+
+  // A catalog left by an earlier run is only reusable when it came from the
+  // URL in use now. Otherwise --resume, or any run after CATALOG_URL changes,
+  // would index from the previous source without saying so.
+  if (!fs.existsSync(CATALOG_PATH) || cachedSource !== CATALOG_URL) {
     console.log('Downloading catalog...');
+    fs.mkdirSync(DATA_DIR, { recursive: true });
     await downloadWithRetry(CATALOG_URL, CATALOG_PATH);
+    fs.writeFileSync(CATALOG_SOURCE_PATH, CATALOG_URL);
   }
   const zip = new AdmZip(CATALOG_PATH);
   const entry = zip.getEntries().find((e) => e.entryName.endsWith('.csv'));
