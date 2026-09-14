@@ -5,6 +5,8 @@ import {
   personListUrl,
   pMap,
   parseCatalog,
+  resumeVerdict,
+  catalogSourceBlocks,
   textUrlFromFileUrl,
   withRetry,
   RETRY_DELAYS,
@@ -222,5 +224,45 @@ describe('withRetry', () => {
       }, [0, 0, 0])
     ).rejects.toThrow('attempt 4');
     expect(calls).toBe(4);
+  });
+});
+
+describe('resumeVerdict', () => {
+  const AOZORA = 'https://www.aozora.gr.jp/index_pages/list_person_all_extended_utf8.zip';
+  const OTHER = 'https://example.com/list_person_all_extended_utf8.zip';
+
+  it('IX-24: 記録された取得元が一致すれば再開できる', () => {
+    expect(resumeVerdict(AOZORA, AOZORA)).toBe('resume');
+  });
+
+  it('IX-25: 取得元が変わっていれば拒否する', () => {
+    expect(resumeVerdict(OTHER, AOZORA)).toBe('reject');
+  });
+
+  it('IX-26: 取得元の記録がない索引は照合できないので引き継ぐ', () => {
+    expect(resumeVerdict(null, AOZORA)).toBe('adopt');
+  });
+});
+
+describe('catalogSourceBlocks', () => {
+  const A = 'https://www.aozora.gr.jp/index_pages/list_person_all_extended_utf8.zip';
+  const B = 'https://example.com/list_person_all_extended_utf8.zip';
+
+  it('IX-27: 取得元が一致すれば妨げない', () => {
+    expect(catalogSourceBlocks(A, A, { resume: true, indexed: 10 })).toBe(false);
+    expect(catalogSourceBlocks(A, A, { resume: false, indexed: 10 })).toBe(false);
+  });
+
+  it('IX-28: 取得元が違えば、--resume でも索引済みがあっても妨げる', () => {
+    expect(catalogSourceBlocks(B, A, { resume: true, indexed: 0 })).toBe(true);
+    expect(catalogSourceBlocks(B, A, { resume: false, indexed: 1 })).toBe(true);
+  });
+
+  it('IX-29: 空の索引への --resume なしの実行は妨げない', () => {
+    expect(catalogSourceBlocks(B, A, { resume: false, indexed: 0 })).toBe(false);
+  });
+
+  it('IX-30: 記録のない索引は妨げない', () => {
+    expect(catalogSourceBlocks(null, A, { resume: true, indexed: 10 })).toBe(false);
   });
 });
