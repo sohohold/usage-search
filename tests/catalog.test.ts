@@ -5,6 +5,7 @@ import {
   personListUrl,
   pMap,
   parseCatalog,
+  redirectTarget,
   resumeVerdict,
   catalogSourceBlocks,
   textUrlFromFileUrl,
@@ -264,5 +265,32 @@ describe('catalogSourceBlocks', () => {
 
   it('IX-30: 記録のない索引は妨げない', () => {
     expect(catalogSourceBlocks(null, A, { resume: true, indexed: 10 })).toBe(false);
+  });
+});
+
+describe('redirectTarget', () => {
+  it('IX-31: 相対 Location を現在の URL に対して解決する', () => {
+    expect(redirectTarget('/catalog.zip', 'https://example.com/a/start')).toBe(
+      'https://example.com/catalog.zip'
+    );
+    expect(redirectTarget('catalog.zip', 'https://example.com/a/start')).toBe(
+      'https://example.com/a/catalog.zip'
+    );
+  });
+
+  it('IX-32: 絶対 http の Location は https に上げる', () => {
+    expect(redirectTarget('http://other.example/x.zip', 'https://example.com/start')).toBe(
+      'https://other.example/x.zip'
+    );
+  });
+
+  it('IX-33: 相対 Location はベースのスキームを保つ', () => {
+    expect(redirectTarget('/catalog.zip', 'http://127.0.0.1:8931/start')).toBe(
+      'http://127.0.0.1:8931/catalog.zip'
+    );
+  });
+
+  it('IX-34: 解釈できない Location は throw する', () => {
+    expect(() => redirectTarget('::::', 'not-a-url')).toThrow();
   });
 });

@@ -155,3 +155,18 @@ export function catalogSourceBlocks(
   if (resumeVerdict(stored, current) !== 'reject') return false;
   return resume || indexed > 0;
 }
+
+/**
+ * Absolute URL to follow for a redirect from `currentUrl` to `location`.
+ *
+ * A Location header may be relative, which http.get rejects outright, so it is
+ * resolved against the URL just requested. An absolute http:// target is
+ * upgraded to https first, to avoid port-80 blocks; upgrading is deliberately
+ * applied to the header rather than the resolved URL, so that a relative
+ * target keeps the scheme the caller chose rather than being rewritten.
+ *
+ * Throws if the result is not a usable URL.
+ */
+export function redirectTarget(location: string, currentUrl: string): string {
+  return new URL(location.replace(/^http:\/\//i, 'https://'), currentUrl).toString();
+}

@@ -30,6 +30,7 @@ import {
   decodeText,
   pMap,
   parseCatalog,
+  redirectTarget,
   resumeVerdict,
   textUrlFromFileUrl,
   withRetry,
@@ -79,9 +80,13 @@ function download(url: string, dest: string): Promise<void> {
       if (res.statusCode !== undefined && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         file.close();
         try { fs.unlinkSync(dest); } catch {}
-        // Upgrade HTTP redirects to HTTPS to avoid port-80 blocks
-        const location = res.headers.location.replace(/^http:\/\//i, 'https://');
-        return download(location, dest).then(resolve, reject);
+        let target: string;
+        try {
+          target = redirectTarget(res.headers.location, url);
+        } catch {
+          return reject(new Error(`Invalid redirect to ${res.headers.location} from ${url}`));
+        }
+        return download(target, dest).then(resolve, reject);
       }
       if (res.statusCode !== 200) {
         file.close();
