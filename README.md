@@ -34,7 +34,7 @@ npm install
 
 ### 2. インデックス作成（初回のみ・全件だと20〜60分程度）
 
-青空文庫の目録とテキストをGitHubミラー（[aozorabunko/aozorabunko](https://github.com/aozorabunko/aozorabunko) の目録CSVと [aozorahack/aozorabunko_text](https://github.com/aozorahack/aozorabunko_text) の本文）からダウンロードし、ローカルのSQLiteファイル（既定 `data/aozora.db`）にFTS5インデックスを構築します。
+目録CSVを[青空文庫](https://www.aozora.gr.jp/)本家から、本文をGitHubミラー（[aozorahack/aozorabunko_text](https://github.com/aozorahack/aozorabunko_text)）からダウンロードし、ローカルのSQLiteファイル（既定 `data/aozora.db`）にFTS5インデックスを構築します。目録の取得元は環境変数 `CATALOG_URL` で差し替えられます。
 
 ```bash
 # 著作権の消滅した全作品をインデックス
@@ -163,7 +163,7 @@ GitHub Actions（`.github/workflows/ci.yml`）で以下を実行:
 ## データソース
 
 [青空文庫](https://www.aozora.gr.jp/) — 著作権の消滅した作品を公開するデジタル図書館。
-インデックス作成時は青空文庫のGitHubミラー（目録: aozorabunko/aozorabunko、本文: aozorahack/aozorabunko_text）からダウンロードします。
+インデックス作成時は、目録を青空文庫本家から、本文をGitHubミラー（aozorahack/aozorabunko_text）からダウンロードします。
 
 ## ライセンス
 

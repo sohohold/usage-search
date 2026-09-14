@@ -30,8 +30,14 @@ import { decodeText, pMap, parseCatalog, textUrlFromFileUrl, withRetry } from '.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DATA_DIR = process.env.DATA_DIR ?? path.join(__dirname, '../data');
 const DB_PATH = process.env.DB_PATH ?? path.join(DATA_DIR, 'aozora.db');
+// 目録は青空文庫本家から取得する。以前は aozorabunko/aozorabunko のGitHubミラーを
+// 見ていたが、このリポジトリは master/main/gh-pages のいずれでも 404 を返すように
+// なり、目録だけでなくカード配下のパスも含めて到達できなくなった。
+// 本文は引き続き aozorahack/aozorabunko_text のミラーから取得する（catalog.ts の
+// textUrlFromFileUrl を参照）。こちらは健在。
 const CATALOG_URL =
-  'https://raw.githubusercontent.com/aozorabunko/aozorabunko/master/index_pages/list_person_all_extended_utf8.zip';
+  process.env.CATALOG_URL ??
+  'https://www.aozora.gr.jp/index_pages/list_person_all_extended_utf8.zip';
 const CATALOG_PATH = path.join(DATA_DIR, 'catalog.zip');
 
 const args = process.argv.slice(2);
