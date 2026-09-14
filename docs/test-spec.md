@@ -134,6 +134,10 @@
 | IX-24 | `resumeVerdict`: 取得元が一致 | 記録された取得元 = 現在の `CATALOG_URL` | `resume`（再開してよい） |
 | IX-25 | `resumeVerdict`: 取得元が相違 | 記録された取得元 ≠ 現在の `CATALOG_URL` | `reject`（`--resume` を拒否する） |
 | IX-26 | `resumeVerdict`: 記録なし | 取得元が記録されていない索引 | `adopt`（照合できないため現在の取得元を記録して続行） |
+| IX-27 | `catalogSourceBlocks`: 取得元が一致 | `--resume` の有無・索引済み件数によらず | 妨げない |
+| IX-28 | `catalogSourceBlocks`: 取得元が相違 | `--resume` あり、または索引済みが1件以上 | 妨げる（`INSERT OR IGNORE` で旧目録の行が残るため） |
+| IX-29 | `catalogSourceBlocks`: 空の索引 | 取得元が相違・`--resume` なし・索引済み0件 | 妨げない（混ざる行がない） |
+| IX-30 | `catalogSourceBlocks`: 記録なし | 取得元が記録されていない索引 | 妨げない（照合できない） |
 
 > ネットワークへの実アクセス（`download` / `downloadCatalog`）は対象外です（§9）。
 

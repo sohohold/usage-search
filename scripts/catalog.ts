@@ -134,3 +134,21 @@ export function resumeVerdict(stored: string | null, current: string): ResumeVer
   if (stored === null) return 'adopt';
   return stored === current ? 'resume' : 'reject';
 }
+
+/**
+ * Whether an index recorded as built from `stored` must be left alone when
+ * indexing from `current`.
+ *
+ * Resuming skips the works already marked ok, and a plain run keeps the rows it
+ * already holds (works are inserted with INSERT OR IGNORE), so either way an
+ * index carrying works from another catalog ends up mixing the two. An empty
+ * index has nothing to mix, so only a populated one blocks a plain run.
+ */
+export function catalogSourceBlocks(
+  stored: string | null,
+  current: string,
+  { resume, indexed }: { resume: boolean; indexed: number }
+): boolean {
+  if (resumeVerdict(stored, current) !== 'reject') return false;
+  return resume || indexed > 0;
+}

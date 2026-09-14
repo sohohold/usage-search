@@ -26,6 +26,7 @@ import http from 'http';
 import { fileURLToPath } from 'url';
 import { cleanAozoraText, splitIntoChunks } from './aozora.js';
 import {
+  catalogSourceBlocks,
   decodeText,
   pMap,
   parseCatalog,
@@ -205,36 +206,45 @@ async function readMeta(db: Client, key: string): Promise<string | null> {
   return res.rows.length > 0 ? (res.rows[0].value as string) : null;
 }
 
+async function countIndexed(db: Client): Promise<number> {
+  const res = await db.execute('SELECT count(*) AS n FROM index_log');
+  return Number(res.rows[0].n);
+}
+
 /**
- * Refuse to resume an index built from a different catalog, then record the
+ * Refuse to index into an index built from a different catalog, then record the
  * catalog in use. Runs before the download so a rejected run costs nothing.
  */
 async function checkCatalogSource(db: Client): Promise<void> {
   const stored = await readMeta(db, META_CATALOG_URL);
+  const indexed = await countIndexed(db);
 
-  if (RESUME) {
-    const verdict = resumeVerdict(stored, CATALOG_URL);
-    if (verdict === 'reject') {
-      console.error(
-        [
-          '--resume was asked for, but this index was built from a different catalog:',
-          `  indexed from: ${stored}`,
-          `  asked for:    ${CATALOG_URL}`,
-          'Resuming skips every work already marked ok, so those would keep the',
-          'metadata and text produced from the old catalog.',
-          `Delete ${DB_PATH} and index again, or point CATALOG_URL back at the`,
-          'catalog this index was built from.',
-        ].join('\n')
-      );
-      process.exit(1);
-    }
-    if (verdict === 'adopt') {
-      console.warn(
-        `This index predates catalog tracking, so there is nothing to compare against. Recording ${CATALOG_URL} and continuing.`
-      );
-    }
+  if (catalogSourceBlocks(stored, CATALOG_URL, { resume: RESUME, indexed })) {
+    console.error(
+      [
+        'This index was built from a different catalog:',
+        `  indexed from: ${stored}`,
+        `  asked for:    ${CATALOG_URL}`,
+        RESUME
+          ? '--resume skips every work already marked ok, so those would keep the'
+          : 'Works already indexed are kept as they are, so those would keep the',
+        'metadata and text produced from the old catalog.',
+        `Delete ${DB_PATH} and index again, or point CATALOG_URL back at the`,
+        'catalog this index was built from.',
+      ].join('\n')
+    );
+    process.exit(1);
   }
 
+  if (RESUME && resumeVerdict(stored, CATALOG_URL) === 'adopt') {
+    console.warn(
+      `This index predates catalog tracking, so there is nothing to compare against. Recording ${CATALOG_URL} and continuing.`
+    );
+  }
+
+  // Safe to claim the catalog now: the check above leaves only an empty index
+  // or one already built from this same catalog, so there are no rows from
+  // elsewhere for this label to misdescribe.
   await db.execute({
     sql: 'INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)',
     args: [META_CATALOG_URL, CATALOG_URL],
